@@ -3,9 +3,12 @@ package com.example.gemma
 import android.content.Context
 import android.util.Log
 import com.google.ai.edge.litertlm.Backend
+import com.google.ai.edge.litertlm.Contents
+import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.Message
+import com.google.ai.edge.litertlm.SamplerConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -15,63 +18,64 @@ import java.io.File
 class GemmaInferenceModel private constructor(private val context: Context) {
 
     private val engine: Engine
-    private val conversation: com.google.ai.edge.litertlm.Conversation
+    private var conversation: com.google.ai.edge.litertlm.Conversation
 
-    /**
-     * Returns the absolute path to the model file on device storage.
-     * IMPORTANT: Do NOT rename or copy the model — LiteRTLM validates format.
-     */
     private fun getModelPath(): String {
         val modelFile = File("/data/local/tmp/llm/gemma3-270m-it-q8.litertlm")
-
         if (!modelFile.exists()) {
-            throw IllegalStateException(
-                "Model not found at ${modelFile.absolutePath}. " +
-                        "Run: adb push gemma3-1b-it-int4.litertlm /data/local/tmp/llm/"
-            )
+            throw IllegalStateException("Model not found at ${modelFile.absolutePath}")
         }
-
-        Log.d(TAG, "Using model at: ${modelFile.absolutePath} (${modelFile.length()} bytes)")
         return modelFile.absolutePath
     }
 
     init {
-        val modelPath = getModelPath()
-
         val engineConfig = EngineConfig(
-            modelPath = modelPath,
+            modelPath = getModelPath(),
             backend = Backend.CPU()
         )
-
         engine = Engine(engineConfig)
         engine.initialize()
+        conversation = createNewConversation()
+        Log.d(TAG, "Gemma initialized")
+    }
 
-        conversation = engine.createConversation()
-
-        Log.d(TAG, "LiteRTLM Engine initialized successfully")
+    private fun createNewConversation(): com.google.ai.edge.litertlm.Conversation {
+        return engine.createConversation(
+            ConversationConfig(
+                systemInstruction = Contents.of(SYSTEM_PROMPT),
+                samplerConfig = SamplerConfig(
+                    topK = 1,       // near-greedy — most reliable for short rephrasing
+                    topP = 0.9,
+                    temperature = 0.3
+                )
+            )
+        )
     }
 
     /**
-     * Streams tokens from the model response.
+     * Each call is fully stateless: the conversation is reset before every prompt
+     * so the model never accumulates history. Gemma's only job is to rephrase
+     * a single short question naturally — nothing more.
      */
-    fun generateResponseAsync(prompt: String): Flow<String> = flow {
-        val responseFlow: Flow<Message> = conversation.sendMessageAsync(prompt)
+    fun rephrase(prompt: String): Flow<String> = flow {
+        // Always start fresh — no history needed for a rephrasing task
+        resetConversation()
 
+        val responseFlow: Flow<Message> = conversation.sendMessageAsync(prompt)
         responseFlow.collect { message ->
             val text = message.contents?.toString().orEmpty()
-
-            if (text.isNotBlank()) {
-                Log.d(TAG, "Token: $text")
-                emit(text)
-            }
+            if (text.isNotBlank()) emit(text)
         }
     }.flowOn(Dispatchers.IO)
 
-    /**
-     * Clean up native resources.
-     */
+    fun resetConversation() {
+        try { conversation.close() } catch (_: Exception) {}
+        conversation = createNewConversation()
+    }
+
     fun close() {
         try {
+            conversation.close()
             engine.close()
         } catch (e: Exception) {
             Log.e(TAG, "Error closing engine", e)
@@ -81,14 +85,24 @@ class GemmaInferenceModel private constructor(private val context: Context) {
     companion object {
         private const val TAG = "GemmaModel"
 
+        /**
+         * Minimal system prompt — the model only needs to rephrase short questions.
+         * No JSON, no step logic, no conversation history. Keeping it this simple
+         * is what makes the 270M model reliable.
+         */
+        val SYSTEM_PROMPT = """
+            You are Taina, a warm and friendly nature assistant.
+            Your only job is to rephrase the question you are given in a natural,
+            encouraging tone. Keep your reply under 12 words. Output only the
+            rephrased question — nothing else, no explanation, no preamble.
+        """.trimIndent()
+
         @Volatile
         private var instance: GemmaInferenceModel? = null
 
         fun getInstance(context: Context): GemmaInferenceModel {
             return instance ?: synchronized(this) {
-                instance ?: GemmaInferenceModel(context.applicationContext).also {
-                    instance = it
-                }
+                instance ?: GemmaInferenceModel(context.applicationContext).also { instance = it }
             }
         }
     }
