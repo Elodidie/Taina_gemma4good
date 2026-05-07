@@ -52,7 +52,7 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
     Column(modifier = Modifier.fillMaxSize()) {
 
         TopAppBar(
-            title = { Text("Gemma 2B Chat") },
+            title = { Text("Taina") },
             colors = TopAppBarDefaults.topAppBarColors(
                 containerColor = MaterialTheme.colorScheme.primaryContainer
             )
