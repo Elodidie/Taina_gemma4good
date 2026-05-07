@@ -32,21 +32,20 @@ android {
         compose = true
     }
 
-    // Needed so the large model .bin isn't compressed in the APK
     aaptOptions {
         noCompress += "bin"
         noCompress += "task"
+        noCompress += "litertlm"  // Added
     }
 }
 
 dependencies {
-    // MediaPipe LLM Inference
-    implementation("com.google.mediapipe:tasks-genai:0.10.22")
+    implementation("com.google.ai.edge.litertlm:litertlm-android:latest.release")  // Updated
 
-    // Compose BOM
+    implementation("com.google.android.material:material:1.12.0")
+
     implementation(platform("androidx.compose:compose-bom:2024.09.00"))
     implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.5")

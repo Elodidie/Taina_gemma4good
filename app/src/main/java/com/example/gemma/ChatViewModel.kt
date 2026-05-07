@@ -40,9 +40,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 model = GemmaInferenceModel.getInstance(getApplication())
                 _modelLoaded.value = true
             } catch (e: Exception) {
+                android.util.Log.e("GemmaModel", "Full error loading model", e)
                 _messages.value = listOf(
                     ChatMessage(
-                        text = "❌ Failed to load model: ${e.message}\n\nMake sure you pushed the model file:\nadb push gemma-2b-it-cpu-int4.bin /data/local/tmp/llm/model.bin",
+                        text = "❌ Failed to load model:\n" +
+                                "${e.javaClass.simpleName}: ${e.message}\n\n" +
+                                "Cause: ${e.cause?.javaClass?.simpleName}: ${e.cause?.message}\n\n" +
+                                "Make sure you pushed the model file:\n" +
+                                "adb push gemma3-1b-it-int4.litertlm /data/local/tmp/llm/model.bin",
                         isUser = false
                     )
                 )
@@ -62,7 +67,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             var accumulated = ""
             model?.generateResponseAsync(userText)
                 ?.catch { e ->
-                    // Replace loading bubble with error
+                    android.util.Log.e("GemmaModel", "Error generating response", e)
                     updateLastBotMessage("Error: ${e.message}")
                     _isLoading.value = false
                 }
