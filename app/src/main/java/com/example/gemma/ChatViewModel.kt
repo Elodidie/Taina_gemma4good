@@ -12,12 +12,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// ─── Data ────────────────────────────────────────────────────────────────────
+// ─── Data ─────────────────────────────────────────────────────────────────────
 
 data class ChatMessage(
     val text: String,
@@ -26,36 +27,7 @@ data class ChatMessage(
     val photoUri: Uri? = null
 )
 
-/**
- * Each value is the hardcoded fallback question shown if Gemma fails or times out.
- * Kotlin owns ALL step logic — Gemma only rephrases these strings.
- */
-enum class ObservationStep(val fallbackQuestion: String) {
-    COMMON_NAME    ("What is the common name of the species?"),
-    SCIENTIFIC_NAME("Do you know the scientific name? No worries if not."),
-    COUNT          ("How many individuals did you see?"),
-    LOCALITY       ("What is the location or place name?"),
-    HABITAT        ("What habitat type? e.g. forest, wetland, grassland, urban, coastal."),
-    NOTES          ("Any extra notes to add? Say 'none' to skip."),
-    CONFIRM        ("Ready to save this record?"),
-    DONE           ("")   // terminal state — no question needed
-}
-
-/**
- * Holds all collected field values for the current observation.
- * Built up answer by answer; converted to DarwinRecord at CONFIRM.
- */
-data class ObservationState(
-    val step: ObservationStep = ObservationStep.COMMON_NAME,
-    val commonName: String     = "",
-    val scientificName: String = "",
-    val count: Int             = 1,
-    val locality: String       = "",
-    val habitat: String        = "",
-    val notes: String          = ""
-)
-
-// ─── ViewModel ───────────────────────────────────────────────────────────────
+// ─── ViewModel ────────────────────────────────────────────────────────────────
 
 class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -72,7 +44,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     val recordSaved: StateFlow<String?> = _recordSaved.asStateFlow()
 
     private var model: GemmaInferenceModel? = null
-    private var obsState         = ObservationState()
+
+    /**
+     * Full conversation history as (userMessage, assistantMessage) pairs.
+     * Sent to Gemma on every call so it has full context — Gemma has no memory.
+     */
+    private val conversationHistory = mutableListOf<Pair<String, String>>()
+
     private var currentPhotoPath = ""
     private var currentLatLon: LatLon? = null
 
@@ -84,7 +62,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         fetchLocation()
     }
 
-    // ─── Init ─────────────────────────────────────────────────────────────────
+    // ─── Init ──────────────────────────────────────────────────────────────────
 
     private fun fetchLocation() {
         viewModelScope.launch {
@@ -102,25 +80,26 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
                 if (_messages.value.isEmpty()) {
                     appendMessage(ChatMessage(
-                        text = "Hi! I'm Taina 🌿 Share a photo or tell me what species you spotted!",
-                        isUser = false
+                        text    = "Hi! I'm Taina 🌿 Share a photo or tell me what species you spotted!",
+                        isUser  = false
                     ))
                 }
             } catch (e: Exception) {
                 Log.e("ChatViewModel", "Error loading model", e)
                 appendMessage(ChatMessage(
-                    text = "❌ Failed to load model:\n${e.message}",
+                    text   = "❌ Failed to load model:\n${e.message}",
                     isUser = false
                 ))
             }
         }
     }
 
-    // ─── Public actions ───────────────────────────────────────────────────────
+    // ─── Public actions ────────────────────────────────────────────────────────
 
     /**
      * Called when the user picks or captures a photo.
-     * Saves the file, shows the thumbnail bubble, then kicks off the Q&A.
+     * Saves the file, shows the thumbnail bubble, then lets Gemma open
+     * the observation dialogue naturally.
      */
     fun onPhotoSelected(uri: Uri) {
         if (_isLoading.value) return
@@ -138,14 +117,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 currentPhotoPath = file.absolutePath
 
                 appendMessage(ChatMessage(
-                    text = "📷 Photo attached",
-                    isUser = true,
+                    text     = "📷 Photo attached",
+                    isUser   = true,
                     photoUri = uri
                 ))
 
-                // Reset state machine for a fresh observation
-                obsState = ObservationState()
-                askCurrentStep()
+                // Reset conversation for a fresh observation
+                startNewObservation()
 
             } catch (e: Exception) {
                 Log.e("ChatViewModel", "Photo handling failed", e)
@@ -156,32 +134,50 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     /**
      * Called on every user text message.
-     * Stores the answer for the current step, advances the state machine,
-     * then either asks the next question or saves the record.
+     * Passes the full history + new message to Gemma and handles the response:
+     * - If the response is a JSON sentinel → parse and save the record.
+     * - Otherwise → show as a normal chat bubble and add to history.
      */
     fun sendMessage(userText: String) {
         if (userText.isBlank() || _isLoading.value) return
 
         appendMessage(ChatMessage(text = userText, isUser = true))
+        appendLoadingBubble()
+        _isLoading.value = true
 
         viewModelScope.launch(Dispatchers.IO) {
-            when (obsState.step) {
-                ObservationStep.DONE -> {
-                    // Previous observation complete — start fresh
-                    obsState = ObservationState()
-                    askCurrentStep()
+            var accumulated = ""
+
+            model?.sendMessage(
+                history     = conversationHistory.toList(),
+                userMessage = userText
+            )
+                ?.catch { e ->
+                    Log.e("ChatViewModel", "Gemma error", e)
+                    updateLastBotMessage("Sorry, something went wrong. Please try again.")
+                    _isLoading.value = false
                 }
-                ObservationStep.CONFIRM -> handleConfirm(userText)
-                else -> {
-                    obsState = storeAnswer(obsState, userText)
-                    obsState = obsState.copy(step = nextStep(obsState.step))
-                    if (obsState.step == ObservationStep.CONFIRM) {
-                        showSummaryAndConfirm()
+                ?.onCompletion {
+                    _isLoading.value = false
+
+                    val trimmed = accumulated.trim()
+                    if (isJsonRecord(trimmed)) {
+                        // Gemma has confirmed and output the record JSON — save it
+                        updateLastBotMessage("✅ Got it! Saving your record…")
+                        parseAndSave(trimmed, userText)
                     } else {
-                        askCurrentStep()
+                        // Normal conversational turn — add to history
+                        updateLastBotMessage(trimmed)
+                        conversationHistory.add(Pair(userText, trimmed))
                     }
                 }
-            }
+                ?.collect { token ->
+                    accumulated += token
+                    // Don't stream JSON sentinel into the bubble — onCompletion handles it
+                    if (!accumulated.trimStart().startsWith("{")) {
+                        updateLastBotMessage(accumulated)
+                    }
+                }
         }
     }
 
@@ -189,183 +185,116 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         _recordSaved.value = null
     }
 
-    // ─── State machine ────────────────────────────────────────────────────────
-
-    /** Stores the user's free-text answer into the correct field. */
-    private fun storeAnswer(state: ObservationState, answer: String): ObservationState {
-        return when (state.step) {
-            ObservationStep.COMMON_NAME     -> state.copy(commonName     = answer.trim())
-            ObservationStep.SCIENTIFIC_NAME -> state.copy(scientificName = answer.trim())
-            ObservationStep.COUNT           -> state.copy(count          = parseCount(answer))
-            ObservationStep.LOCALITY        -> state.copy(locality       = answer.trim())
-            ObservationStep.HABITAT         -> state.copy(habitat        = answer.trim())
-            ObservationStep.NOTES           -> state.copy(notes          =
-                if (answer.trim().lowercase() == "none") "" else answer.trim())
-            else -> state
-        }
-    }
-
-    private fun nextStep(current: ObservationStep): ObservationStep {
-        return when (current) {
-            ObservationStep.COMMON_NAME     -> ObservationStep.SCIENTIFIC_NAME
-            ObservationStep.SCIENTIFIC_NAME -> ObservationStep.COUNT
-            ObservationStep.COUNT           -> ObservationStep.LOCALITY
-            ObservationStep.LOCALITY        -> ObservationStep.HABITAT
-            ObservationStep.HABITAT         -> ObservationStep.NOTES
-            ObservationStep.NOTES           -> ObservationStep.CONFIRM
-            ObservationStep.CONFIRM         -> ObservationStep.DONE
-            ObservationStep.DONE            -> ObservationStep.DONE
-        }
-    }
-
-    /** Parses a count from free text — handles word numbers, falls back to 1. */
-    private fun parseCount(text: String): Int {
-        val wordMap = mapOf(
-            "one" to 1, "two" to 2, "three" to 3, "four" to 4, "five" to 5,
-            "six" to 6, "seven" to 7, "eight" to 8, "nine" to 9, "ten" to 10
-        )
-        val lower = text.trim().lowercase()
-        wordMap[lower]?.let { return it }
-        // Also try extracting first number from a phrase like "about 3"
-        return Regex("\\d+").find(lower)?.value?.toIntOrNull() ?: 1
-    }
-
-    // ─── Question asking ──────────────────────────────────────────────────────
+    // ─── Conversation management ───────────────────────────────────────────────
 
     /**
-     * Asks Gemma to rephrase the hardcoded fallback question for the current step.
-     * Each call is fully stateless — Gemma gets no conversation history, just one prompt.
-     * If Gemma fails or goes off-script, [sanitiseRephrasing] falls back to the hardcoded string.
+     * Resets history and asks Gemma to open a fresh observation dialogue.
+     * Called after a photo is attached or when starting over.
      */
-    private suspend fun askCurrentStep() {
-        val step = obsState.step
-        if (step == ObservationStep.DONE) return
+    private suspend fun startNewObservation() {
+        conversationHistory.clear()
+        currentPhotoPath = ""
 
-        val fallback = step.fallbackQuestion
+        // Seed the conversation with a trigger message so Gemma asks the first question
+        val trigger = "I just spotted a species and want to record it."
+        appendMessage(ChatMessage(text = trigger, isUser = true))
         appendLoadingBubble()
         _isLoading.value = true
 
-        val prompt = "Rephrase this question as Taina, friendly and warm, under 12 words: \"$fallback\""
-
         var accumulated = ""
-        var tokenCount  = 0
 
-        model?.rephrase(prompt)
+        model?.sendMessage(
+            history     = emptyList(),
+            userMessage = trigger
+        )
             ?.catch { e ->
-                Log.w("ChatViewModel", "Gemma rephrase failed, using fallback. ${e.message}")
-                updateLastBotMessage(fallback)
+                Log.e("ChatViewModel", "Gemma error on start", e)
+                updateLastBotMessage("What species did you spot? 🌿")
                 _isLoading.value = false
             }
             ?.onCompletion {
-                val finalText = sanitiseRephrasing(accumulated, fallback)
-                updateLastBotMessage(finalText)
                 _isLoading.value = false
+                val trimmed = accumulated.trim()
+                updateLastBotMessage(trimmed)
+                conversationHistory.add(Pair(trigger, trimmed))
             }
             ?.collect { token ->
                 accumulated += token
-                tokenCount++
-                if (tokenCount % 4 == 0) updateLastBotMessage(accumulated)
+                updateLastBotMessage(accumulated)
             }
     }
 
-    /**
-     * Displays a summary of all collected fields, then asks the confirm question.
-     */
-    private suspend fun showSummaryAndConfirm() {
-        val s = obsState
-        val summary = buildString {
-            appendLine("Here's what I've recorded:")
-            appendLine("🐾 Species: ${s.commonName}")
-            if (s.scientificName.isNotBlank()) appendLine("🔬 Scientific: ${s.scientificName}")
-            appendLine("🔢 Count: ${s.count}")
-            appendLine("📍 Location: ${s.locality}")
-            appendLine("🌿 Habitat: ${s.habitat}")
-            if (s.notes.isNotBlank()) appendLine("📝 Notes: ${s.notes}")
-        }
-        appendMessage(ChatMessage(text = summary.trim(), isUser = false))
-        askCurrentStep()
-    }
+    // ─── JSON detection & record saving ───────────────────────────────────────
 
     /**
-     * Handles a yes/no answer at the CONFIRM step.
-     * Yes → save the record. No → offer to restart.
+     * Returns true if the response looks like Taina's sentinel JSON record.
+     * We look for the required keys rather than just checking for '{' to avoid
+     * false positives if Gemma mentions JSON in conversation.
      */
-    private fun handleConfirm(userText: String) {
-        val lower = userText.trim().lowercase()
-        val isYes = lower in listOf(
-            "yes", "y", "yeah", "yep", "sure", "ok",
-            "okay", "save", "confirm", "go ahead", "do it"
-        )
-
-        if (isYes) {
-            saveRecord()
-        } else {
-            obsState = obsState.copy(step = ObservationStep.DONE)
-            appendMessage(ChatMessage(
-                text = "No problem! Send a photo or type a species name to start a new observation.",
-                isUser = false
-            ))
-        }
+    private fun isJsonRecord(text: String): Boolean {
+        val stripped = text.trim()
+        if (!stripped.startsWith("{")) return false
+        return try {
+            val json = JSONObject(stripped)
+            json.has("commonName") && json.has("count") && json.has("locality")
+        } catch (_: Exception) { false }
     }
 
-    // ─── Record saving ────────────────────────────────────────────────────────
-
-    private fun saveRecord() {
-        val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-        val record = DarwinRecord(
-            scientificName   = obsState.scientificName,
-            vernacularName   = obsState.commonName,
-            individualCount  = obsState.count,
-            locality         = obsState.locality,
-            habitat          = obsState.habitat,
-            notes            = obsState.notes,
-            eventDate        = today,
-            decimalLatitude  = currentLatLon?.lat,
-            decimalLongitude = currentLatLon?.lon,
-            photoPath        = currentPhotoPath
-        )
-
+    private fun parseAndSave(json: String, lastUserMessage: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                val obj = JSONObject(json)
+                val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+
+                val record = DarwinRecord(
+                    scientificName   = obj.optString("scientificName", ""),
+                    vernacularName   = obj.optString("commonName", ""),
+                    individualCount  = obj.optInt("count", 1),
+                    locality         = obj.optString("locality", ""),
+                    habitat          = obj.optString("habitat", ""),
+                    notes            = obj.optString("notes", ""),
+                    eventDate        = today,
+                    decimalLatitude  = currentLatLon?.lat,
+                    decimalLongitude = currentLatLon?.lon,
+                    photoPath        = currentPhotoPath
+                )
+
+                // ── Logcat verification ──────────────────────────────────────
+                // Filter by tag "TainaRecord" in Logcat to verify every save.
+                // Example Logcat query: tag:TainaRecord
+                Log.d("TainaRecord", "────────────────────────────────────────")
+                Log.d("TainaRecord", "commonName     : ${record.vernacularName}")
+                Log.d("TainaRecord", "scientificName : ${record.scientificName}")
+                Log.d("TainaRecord", "count          : ${record.individualCount}")
+                Log.d("TainaRecord", "locality       : ${record.locality}")
+                Log.d("TainaRecord", "habitat        : ${record.habitat}")
+                Log.d("TainaRecord", "notes          : ${record.notes}")
+                Log.d("TainaRecord", "date           : ${record.eventDate}")
+                Log.d("TainaRecord", "lat/lon        : ${record.decimalLatitude}, ${record.decimalLongitude}")
+                Log.d("TainaRecord", "occurrenceID   : ${record.occurrenceID}")
+                Log.d("TainaRecord", "────────────────────────────────────────")
+
                 dao.insert(record)
                 SyncWorker.schedule(getApplication())
                 _recordSaved.value = record.occurrenceID
 
                 appendMessage(ChatMessage(
-                    text = "✅ Record saved! It will sync to GBIF when you're on WiFi.",
+                    text   = "✅ Record saved! It will sync to GBIF when you're on WiFi.\n\nSpot another species? Share a photo or just tell me what you saw! 🌿",
                     isUser = false
                 ))
-            } catch (e: Exception) {
-                Log.e("ChatViewModel", "Failed to save record", e)
-                appendMessage(ChatMessage(
-                    text = "❌ Failed to save: ${e.message}",
-                    isUser = false
-                ))
-            } finally {
-                obsState         = ObservationState()
+
+                // Reset for next observation
+                conversationHistory.clear()
                 currentPhotoPath = ""
+
+            } catch (e: Exception) {
+                Log.e("ChatViewModel", "Failed to parse or save record", e)
+                appendMessage(ChatMessage(
+                    text   = "❌ Failed to save: ${e.message}",
+                    isUser = false
+                ))
             }
         }
-    }
-
-    // ─── Output sanity check ──────────────────────────────────────────────────
-
-    /**
-     * Gemma sometimes outputs preamble or goes off-script.
-     * Take the first non-blank line only, and fall back to the hardcoded question
-     * if the result is too short, too long, or looks like an explanation rather
-     * than a question.
-     */
-    private fun sanitiseRephrasing(raw: String, fallback: String): String {
-        val cleaned = raw
-            .trim()
-            .lines()
-            .firstOrNull { it.isNotBlank() }
-            ?.trim()
-            ?: return fallback
-
-        val wordCount = cleaned.split("\\s+".toRegex()).size
-        return if (wordCount in 3..20) cleaned else fallback
     }
 
     // ─── UI helpers ───────────────────────────────────────────────────────────

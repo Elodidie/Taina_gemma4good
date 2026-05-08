@@ -99,7 +99,10 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
         }
     }
 
-    LaunchedEffect(messages.size) {
+    // Scroll when a new message is added OR when the last message grows
+    // (bot responses update in-place, so messages.size alone never triggers)
+    val lastMessageText = messages.lastOrNull()?.text?.length ?: 0
+    LaunchedEffect(messages.size, lastMessageText) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
     }
 

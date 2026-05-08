@@ -8,7 +8,10 @@
 
     <application
         android:label="Taina"
-        android:theme="@style/Theme.Gemma">
+        android:theme="@style/Theme.Gemma"
+        android:usesCleartextTraffic="true">
+        <!-- ↑ Allows plain HTTP to 10.0.2.2 (Ollama on host machine).
+               Remove this line before releasing to production. -->
 
         <!-- Required for LiteRT-LM GPU backend -->
         <uses-native-library android:name="libvndksupport.so" android:required="false"/>
