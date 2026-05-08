@@ -21,9 +21,16 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Forum
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -38,14 +45,59 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.rememberAsyncImagePainter
 import java.io.File
 
+// ─── Navigation ───────────────────────────────────────────────────────────────
+
+enum class TainaScreen { Chat, Records, Stats }
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    ChatScreen()
+            TainaTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
+                    TainaApp()
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun TainaApp() {
+    var currentScreen by remember { mutableStateOf(TainaScreen.Chat) }
+
+    Scaffold(
+        bottomBar = {
+            NavigationBar {
+                NavigationBarItem(
+                    selected = currentScreen == TainaScreen.Chat,
+                    onClick  = { currentScreen = TainaScreen.Chat },
+                    icon     = { Icon(Icons.Default.Forum, contentDescription = "Chat") },
+                    label    = { Text("Taina") }
+                )
+                NavigationBarItem(
+                    selected = currentScreen == TainaScreen.Records,
+                    onClick  = { currentScreen = TainaScreen.Records },
+                    icon     = { Icon(Icons.Default.List, contentDescription = "Records") },
+                    label    = { Text("My Records") }
+                )
+                NavigationBarItem(
+                    selected = currentScreen == TainaScreen.Stats,
+                    onClick  = { currentScreen = TainaScreen.Stats },
+                    icon     = { Icon(Icons.Default.BarChart, contentDescription = "Stats") },
+                    label    = { Text("Stats") }
+                )
+            }
+        }
+    ) { innerPadding ->
+        Box(modifier = Modifier.padding(innerPadding)) {
+            when (currentScreen) {
+                TainaScreen.Chat    -> ChatScreen()
+                TainaScreen.Records -> RecordsScreen()
+                TainaScreen.Stats   -> StatsScreen()
             }
         }
     }
@@ -196,10 +248,10 @@ fun ChatBubble(message: ChatMessage) {
         MaterialTheme.colorScheme.secondaryContainer
 
     Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = alignment) {
-        // Show photo thumbnail if present
-        message.photoUri?.let { uri ->
+        // Show photo thumbnail if present — load from the internal file, never from a content URI
+        message.photoPath?.let { path ->
             Image(
-                painter = rememberAsyncImagePainter(uri),
+                painter = rememberAsyncImagePainter(File(path)),
                 contentDescription = "Observation photo",
                 modifier = Modifier
                     .size(180.dp)

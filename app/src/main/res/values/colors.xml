@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Taina brand colours — kept in sync with TainaTheme.kt -->
+    <color name="taina_primary">#00C878</color>   <!-- vivid leaf-green (logo mark) -->
+    <color name="taina_bg">#0F1510</color>         <!-- dark forest-night background -->
+    <color name="taina_surface">#161D17</color>    <!-- slightly lighter surface / nav bar -->
+</resources>

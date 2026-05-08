@@ -1,4 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Gemma" parent="Theme.MaterialComponents.DayNight.NoActionBar"/>
+    <!--
+        Taina splash / window background theme.
+        Compose draws its own content on top; this only controls the system chrome
+        (status bar, navigation bar) before Compose takes over.
+    -->
+    <style name="Theme.Gemma" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <!-- Match the dark forest-night background from the logo -->
+        <item name="android:windowBackground">@color/taina_bg</item>
+        <item name="android:statusBarColor">@color/taina_bg</item>
+        <item name="android:navigationBarColor">@color/taina_surface</item>
+        <!-- Light icons so they're visible on the dark background -->
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
 </resources>

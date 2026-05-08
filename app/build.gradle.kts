@@ -57,6 +57,7 @@ dependencies {
     // Coil for photo thumbnails
     implementation("io.coil-kt:coil-compose:2.6.0")
 
+
     // Material
     implementation("com.google.android.material:material:1.12.0")
 

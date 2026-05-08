@@ -3,6 +3,7 @@ package com.example.gemma
 import android.app.Application
 import android.net.Uri
 import android.util.Log
+import android.media.ExifInterface
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -24,7 +25,7 @@ data class ChatMessage(
     val text: String,
     val isUser: Boolean,
     val isLoading: Boolean = false,
-    val photoUri: Uri? = null
+    val photoPath: String? = null   // absolute path to the internal copy; never a content URI
 )
 
 // ─── ViewModel ────────────────────────────────────────────────────────────────
@@ -110,16 +111,40 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     getApplication<Application>().filesDir,
                     "obs_${System.currentTimeMillis()}.jpg"
                 )
-                getApplication<Application>()
+
+                val bytesCopied = getApplication<Application>()
                     .contentResolver
                     .openInputStream(uri)
                     ?.use { input -> file.outputStream().use { input.copyTo(it) } }
+
+                if (bytesCopied == null || bytesCopied == 0L) {
+                    Log.e("ChatViewModel", "Photo copy failed — stream was null or empty for $uri")
+                    appendMessage(ChatMessage(text = "⚠️ Could not read the photo. Try selecting it again.", isUser = false))
+                    return@launch
+                }
+
+                Log.d("ChatViewModel", "Photo copied: ${file.absolutePath} ($bytesCopied bytes)")
                 currentPhotoPath = file.absolutePath
 
+                // ── GPS: prefer EXIF from the photo (taken at the observation site),
+                // fall back to the device's current position.
+                val exifLocation = readExifLocation(file.absolutePath)
+                currentLatLon = when {
+                    exifLocation != null -> {
+                        Log.d("ChatViewModel", "GPS from photo EXIF: $exifLocation")
+                        exifLocation
+                    }
+                    else -> {
+                        val deviceLocation = locationHelper.getCurrentLocation()
+                        Log.d("ChatViewModel", "GPS from device (no EXIF): $deviceLocation")
+                        deviceLocation
+                    }
+                }
+
                 appendMessage(ChatMessage(
-                    text     = "📷 Photo attached",
-                    isUser   = true,
-                    photoUri = uri
+                    text      = "📷 Photo attached",
+                    isUser    = true,
+                    photoPath = file.absolutePath
                 ))
 
                 // Reset conversation for a fresh observation
@@ -159,24 +184,25 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 ?.onCompletion {
                     _isLoading.value = false
-
                     val trimmed = accumulated.trim()
-                    if (isJsonRecord(trimmed)) {
-                        // Gemma has confirmed and output the record JSON — save it
-                        updateLastBotMessage("✅ Got it! Saving your record…")
-                        parseAndSave(trimmed, userText)
+
+                    // Extract JSON even if Gemma wraps it in prose —
+                    // scan for the first { ... } block in the response
+                    val jsonBlock = extractJson(trimmed)
+                    if (jsonBlock != null && isJsonRecord(jsonBlock)) {
+                        // Never show the JSON — replace loading bubble with success message
+                        updateLastBotMessage("✅ Observation saved! It will sync to GBIF when WiFi is available. 🌿 Spot another species? Just tell me what you saw!")
+                                parseAndSave(jsonBlock, userText)
                     } else {
-                        // Normal conversational turn — add to history
+                        // Normal conversational turn — show response and add to history
                         updateLastBotMessage(trimmed)
                         conversationHistory.add(Pair(userText, trimmed))
                     }
                 }
                 ?.collect { token ->
+                    // Accumulate silently — bubble is set once in onCompletion
+                    // This avoids any partial JSON flashing in the UI
                     accumulated += token
-                    // Don't stream JSON sentinel into the bubble — onCompletion handles it
-                    if (!accumulated.trimStart().startsWith("{")) {
-                        updateLastBotMessage(accumulated)
-                    }
                 }
         }
     }
@@ -194,6 +220,15 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private suspend fun startNewObservation() {
         conversationHistory.clear()
         currentPhotoPath = ""
+
+        // Refresh device GPS at the start of each observation so text-only
+        // records get a fresh fix rather than the one captured at app launch.
+        // (For photo observations this is already overwritten by EXIF or a
+        // fresh fetch inside onPhotoSelected, so this is a no-op in that path.)
+        if (currentLatLon == null) {
+            currentLatLon = locationHelper.getCurrentLocation()
+            Log.d("ChatViewModel", "GPS refreshed at observation start: $currentLatLon")
+        }
 
         // Seed the conversation with a trigger message so Gemma asks the first question
         val trigger = "I just spotted a species and want to record it."
@@ -227,10 +262,32 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // ─── JSON detection & record saving ───────────────────────────────────────
 
     /**
-     * Returns true if the response looks like Taina's sentinel JSON record.
-     * We look for the required keys rather than just checking for '{' to avoid
-     * false positives if Gemma mentions JSON in conversation.
+     * Extracts the first well-formed JSON object from a string by counting braces.
+     * Handles nested objects and ignores any prose that surrounds or follows the JSON block.
      */
+    private fun extractJson(text: String): String? {
+        val start = text.indexOf('{')
+        if (start == -1) return null
+        var depth = 0
+        var inString = false
+        var escape = false
+        for (i in start until text.length) {
+            val c = text[i]
+            if (escape) { escape = false; continue }
+            if (c == '\\' && inString) { escape = true; continue }
+            if (c == '"') { inString = !inString; continue }
+            if (inString) continue
+            when (c) {
+                '{' -> depth++
+                '}' -> {
+                    depth--
+                    if (depth == 0) return text.substring(start, i + 1)
+                }
+            }
+        }
+        return null
+    }
+
     private fun isJsonRecord(text: String): Boolean {
         val stripped = text.trim()
         if (!stripped.startsWith("{")) return false
@@ -240,60 +297,84 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         } catch (_: Exception) { false }
     }
 
-    private fun parseAndSave(json: String, lastUserMessage: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val obj = JSONObject(json)
-                val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+    private suspend fun parseAndSave(json: String, lastUserMessage: String) {
+        try {
+            val obj = JSONObject(json)
+            val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
 
-                val record = DarwinRecord(
-                    scientificName   = obj.optString("scientificName", ""),
-                    vernacularName   = obj.optString("commonName", ""),
-                    individualCount  = obj.optInt("count", 1),
-                    locality         = obj.optString("locality", ""),
-                    habitat          = obj.optString("habitat", ""),
-                    notes            = obj.optString("notes", ""),
-                    eventDate        = today,
-                    decimalLatitude  = currentLatLon?.lat,
-                    decimalLongitude = currentLatLon?.lon,
-                    photoPath        = currentPhotoPath
-                )
-
-                // ── Logcat verification ──────────────────────────────────────
-                // Filter by tag "TainaRecord" in Logcat to verify every save.
-                // Example Logcat query: tag:TainaRecord
-                Log.d("TainaRecord", "────────────────────────────────────────")
-                Log.d("TainaRecord", "commonName     : ${record.vernacularName}")
-                Log.d("TainaRecord", "scientificName : ${record.scientificName}")
-                Log.d("TainaRecord", "count          : ${record.individualCount}")
-                Log.d("TainaRecord", "locality       : ${record.locality}")
-                Log.d("TainaRecord", "habitat        : ${record.habitat}")
-                Log.d("TainaRecord", "notes          : ${record.notes}")
-                Log.d("TainaRecord", "date           : ${record.eventDate}")
-                Log.d("TainaRecord", "lat/lon        : ${record.decimalLatitude}, ${record.decimalLongitude}")
-                Log.d("TainaRecord", "occurrenceID   : ${record.occurrenceID}")
-                Log.d("TainaRecord", "────────────────────────────────────────")
-
-                dao.insert(record)
-                SyncWorker.schedule(getApplication())
-                _recordSaved.value = record.occurrenceID
-
-                appendMessage(ChatMessage(
-                    text   = "✅ Record saved! It will sync to GBIF when you're on WiFi.\n\nSpot another species? Share a photo or just tell me what you saw! 🌿",
-                    isUser = false
-                ))
-
-                // Reset for next observation
-                conversationHistory.clear()
-                currentPhotoPath = ""
-
-            } catch (e: Exception) {
-                Log.e("ChatViewModel", "Failed to parse or save record", e)
-                appendMessage(ChatMessage(
-                    text   = "❌ Failed to save: ${e.message}",
-                    isUser = false
-                ))
+            // Last-chance GPS fetch for text-only observations where no earlier
+            // fix was captured (e.g. the user typed directly without attaching a photo).
+            if (currentLatLon == null) {
+                currentLatLon = locationHelper.getCurrentLocation()
+                Log.d("TainaRecord", "GPS fetched at save time (last chance): $currentLatLon")
             }
+
+            val record = DarwinRecord(
+                scientificName   = obj.optString("scientificName", ""),
+                vernacularName   = obj.optString("commonName", ""),
+                individualCount  = obj.optInt("count", 1),
+                locality         = obj.optString("locality", ""),
+                habitat          = obj.optString("habitat", ""),
+                notes            = obj.optString("notes", ""),
+                eventDate        = today,
+                decimalLatitude  = currentLatLon?.lat,
+                decimalLongitude = currentLatLon?.lon,
+                photoPath        = currentPhotoPath
+            )
+
+            // ── Logcat verification ──────────────────────────────────────
+            // Filter by tag "TainaRecord" in Logcat to verify every save.
+            // Example Logcat query: tag:TainaRecord
+            Log.d("TainaRecord", "────────────────────────────────────────")
+            Log.d("TainaRecord", "commonName     : ${record.vernacularName}")
+            Log.d("TainaRecord", "scientificName : ${record.scientificName}")
+            Log.d("TainaRecord", "count          : ${record.individualCount}")
+            Log.d("TainaRecord", "locality       : ${record.locality}")
+            Log.d("TainaRecord", "habitat        : ${record.habitat}")
+            Log.d("TainaRecord", "notes          : ${record.notes}")
+            Log.d("TainaRecord", "date           : ${record.eventDate}")
+            Log.d("TainaRecord", "lat/lon        : ${record.decimalLatitude}, ${record.decimalLongitude}")
+            Log.d("TainaRecord", "occurrenceID   : ${record.occurrenceID}")
+            Log.d("TainaRecord", "────────────────────────────────────────")
+
+            dao.insert(record)
+            SyncWorker.schedule(getApplication())
+            _recordSaved.value = record.occurrenceID
+
+            // Reset for next observation
+            conversationHistory.clear()
+            currentPhotoPath = ""
+
+        } catch (e: Exception) {
+            Log.e("ChatViewModel", "Failed to parse or save record", e)
+            appendMessage(ChatMessage(
+                text   = "❌ Failed to save: ${e.message}",
+                isUser = false
+            ))
+        }
+    }
+
+    // ─── EXIF GPS ─────────────────────────────────────────────────────────────
+
+    /**
+     * Reads GPS coordinates embedded in a JPEG by the camera app at capture time.
+     * Returns null if the file has no EXIF location data (e.g. gallery photos
+     * downloaded from the web, or screenshots).
+     *
+     * Why prefer EXIF over device GPS?
+     * A user may attach a photo taken at the observation site but record it later
+     * from a different location. EXIF carries the coordinates of *when and where
+     * the shutter was pressed*, which is exactly what we want for biodiversity data.
+     */
+    private fun readExifLocation(filePath: String): LatLon? {
+        return try {
+            val exif    = ExifInterface(filePath)
+            val latLon  = FloatArray(2)
+            if (exif.getLatLong(latLon)) LatLon(latLon[0].toDouble(), latLon[1].toDouble())
+            else null
+        } catch (e: Exception) {
+            Log.d("ChatViewModel", "No EXIF GPS in $filePath: ${e.message}")
+            null
         }
     }
 

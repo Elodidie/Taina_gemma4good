@@ -2,6 +2,7 @@ package com.example.gemma
 
 import android.content.Context
 import androidx.room.*
+import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface DarwinDao {
@@ -12,10 +13,13 @@ interface DarwinDao {
     suspend fun getPending(): List<DarwinRecord>
 
     @Query("SELECT * FROM darwin_records ORDER BY createdAt DESC")
-    suspend fun getAll(): List<DarwinRecord>
+    fun getAll(): Flow<List<DarwinRecord>>
 
     @Query("UPDATE darwin_records SET status = 'SYNCED' WHERE occurrenceID = :id")
     suspend fun markSynced(id: String)
+
+    @Query("DELETE FROM darwin_records")
+    suspend fun deleteAll()
 }
 
 @Database(entities = [DarwinRecord::class], version = 1)
