@@ -94,7 +94,7 @@ Go to [https://ollama.com](https://ollama.com) and download the installer for yo
 Open a terminal and run:
 
 ```bash
-ollama pull gemma3:4b
+ollama pull gemma4:2b
 ```
 
 This downloads the ~3 GB Gemma 3 4B model. It only needs to be done once.
@@ -102,7 +102,7 @@ This downloads the ~3 GB Gemma 3 4B model. It only needs to be done once.
 To verify it works:
 
 ```bash
-ollama run gemma3:4b "Hello, describe a rainforest in one sentence."
+ollama run gemma4:2b "Hello, describe a rainforest in one sentence."
 ```
 
 #### 4c. Check the app is pointing to Ollama
@@ -111,7 +111,7 @@ Open `app/src/main/java/com/example/gemma/GemmaInferenceModel.kt` and confirm:
 
 ```kotlin
 private val useOllama   = true
-private val ollamaModel = "gemma3:4b"
+private val ollamaModel = "gemma4:2b"
 ```
 
 The emulator reaches your computer at `10.0.2.2` (Android's alias for the host machine's `localhost`), which is already configured:
