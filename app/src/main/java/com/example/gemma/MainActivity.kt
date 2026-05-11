@@ -190,7 +190,8 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
                 containerColor    = Color(0xFF282828),
                 titleContentColor = Color(0xFFF2EEE4)
             ),
-            expandedHeight = 40.dp
+            expandedHeight = 40.dp,
+            windowInsets = WindowInsets(0)
         )
 
         if (!modelLoaded) {

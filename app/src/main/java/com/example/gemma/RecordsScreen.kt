@@ -69,6 +69,7 @@ fun RecordsScreen(vm: RecordsViewModel = viewModel()) {
                 titleContentColor = Color(0xFFF2EEE4)
             ),
             expandedHeight = 40.dp,
+            windowInsets = WindowInsets(0),
             actions = {
                 if (total > 0) {
                     IconButton(onClick = { showConfirm = true }) {
