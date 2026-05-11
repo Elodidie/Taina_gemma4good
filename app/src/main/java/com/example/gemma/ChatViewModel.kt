@@ -113,6 +113,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun onPhotoSelected(uri: Uri) {
         if (_isLoading.value) return
+        // Lock immediately so a second photo tap during the file-copy / GPS fetch
+        // window cannot start a concurrent observation flow.
+        _isLoading.value = true
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -129,6 +132,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 if (bytesCopied == null || bytesCopied == 0L) {
                     Log.e("ChatViewModel", "Photo copy failed — stream was null or empty for $uri")
                     appendMessage(ChatMessage(text = "⚠️ Could not read the photo. Try selecting it again.", isUser = false))
+                    _isLoading.value = false
                     return@launch
                 }
 
@@ -144,9 +148,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                         exifLocation
                     }
                     else -> {
-                        val deviceLocation = locationHelper.getCurrentLocation()
+                        val deviceLocation = withTimeoutOrNull(5_000) { locationHelper.getCurrentLocation() }
                         Log.d("ChatViewModel", "GPS from device (no EXIF): $deviceLocation")
-                        // Embed the device GPS into the photo so the file is self-contained
                         if (deviceLocation != null) writeExifLocation(file.absolutePath, deviceLocation)
                         deviceLocation
                     }
@@ -159,11 +162,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 ))
 
                 // Reset conversation for a fresh observation
+                // (_isLoading stays true — startNewObservation keeps it set until Gemma responds)
                 startNewObservation()
 
             } catch (e: Exception) {
                 Log.e("ChatViewModel", "Photo handling failed", e)
                 appendMessage(ChatMessage(text = "Failed to process image.", isUser = false))
+                _isLoading.value = false
             }
         }
     }
