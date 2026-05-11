@@ -33,7 +33,7 @@ class GemmaInferenceModel private constructor(private val context: Context) {
     // Ollama settings — only used when useOllama = true
     // 10.0.2.2 is the Android emulator's alias for your host machine's localhost
     private val ollamaBaseUrl = "http://10.0.2.2:11434"
-    private val ollamaModel   = "gemma4:2b"
+    private val ollamaModel   = "gemma4:e2b"
 
     // LiteRT engine — only initialised when useOllama = false
     private val engine: Engine?
