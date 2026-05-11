@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import java.io.File
 import java.text.SimpleDateFormat
@@ -313,11 +314,20 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val obj = JSONObject(json)
             val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
 
-            // Last-chance GPS fetch for text-only observations where no earlier
-            // fix was captured (e.g. the user typed directly without attaching a photo).
+            // Last-chance GPS: cap at 5 s so the save is never blocked for 30+ s.
             if (currentLatLon == null) {
-                currentLatLon = locationHelper.getCurrentLocation()
-                Log.d("TainaRecord", "GPS fetched at save time (last chance): $currentLatLon")
+                currentLatLon = withTimeoutOrNull(5_000) { locationHelper.getCurrentLocation() }
+                Log.d("TainaRecord", "GPS from device (last chance): $currentLatLon")
+            }
+
+            // Geocode fallback: if device GPS is still unavailable but the user
+            // gave a locality name, resolve it to coordinates via the OS Geocoder.
+            if (currentLatLon == null) {
+                val locality = obj.optString("locality", "")
+                if (locality.isNotBlank()) {
+                    currentLatLon = geocodeLocality(locality)
+                    Log.d("TainaRecord", "GPS from geocoding '$locality': $currentLatLon")
+                }
             }
 
             val record = DarwinRecord(
@@ -385,6 +395,26 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             else null
         } catch (e: Exception) {
             Log.d("ChatViewModel", "No EXIF GPS in $filePath: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Converts a place name to GPS coordinates using the OS Geocoder.
+     * Used as a fallback when the device has no GPS fix but the user mentioned
+     * a locality (e.g. "Zurich" → 47.3769, 8.5417).
+     * Must be called on a background thread (Geocoder does network I/O).
+     */
+    private fun geocodeLocality(locality: String): LatLon? {
+        return try {
+            val geocoder = android.location.Geocoder(getApplication(), Locale.getDefault())
+            @Suppress("DEPRECATION")
+            val results = geocoder.getFromLocationName(locality, 1)
+            if (!results.isNullOrEmpty()) {
+                LatLon(results[0].latitude, results[0].longitude)
+            } else null
+        } catch (e: Exception) {
+            Log.w("ChatViewModel", "Geocoding failed for '$locality': ${e.message}")
             null
         }
     }
