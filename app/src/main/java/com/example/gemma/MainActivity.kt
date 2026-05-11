@@ -187,7 +187,8 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
             title = { Text("Taina 🌿") },
             colors = TopAppBarDefaults.topAppBarColors(
                 containerColor = MaterialTheme.colorScheme.primaryContainer
-            )
+            ),
+            expandedHeight = 48.dp
         )
 
         if (!modelLoaded) {
