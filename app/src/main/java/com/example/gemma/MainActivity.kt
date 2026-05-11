@@ -136,9 +136,9 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
     // Camera URI
     var cameraUri by remember { mutableStateOf<Uri?>(null) }
 
-    // Photo picker launcher
+    // File picker — GetContent allows selecting images from any folder (Downloads, etc.)
     val photoPickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia()
+        ActivityResultContracts.GetContent()
     ) { uri -> uri?.let { vm.onPhotoSelected(it) } }
 
     // Camera launcher
@@ -221,11 +221,7 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
             // Gallery button
             IconButton(
                 onClick = {
-                    photoPickerLauncher.launch(
-                        androidx.activity.result.PickVisualMediaRequest(
-                            ActivityResultContracts.PickVisualMedia.ImageOnly
-                        )
-                    )
+                    photoPickerLauncher.launch("image/*")
                 },
                 enabled = modelLoaded && !isLoading
             ) {
