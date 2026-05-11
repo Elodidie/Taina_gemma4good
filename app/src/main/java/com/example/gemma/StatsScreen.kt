@@ -1,10 +1,5 @@
 package com.example.gemma
 
-import android.content.Context
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -16,19 +11,16 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
 
 // ─── Stats Screen ──────────────────────────────────────────────────────────────
@@ -230,26 +222,21 @@ private fun TopSpeciesCard(data: List<SpeciesCount>) {
 }
 
 // ─── Map card ──────────────────────────────────────────────────────────────────
-// allRecords = full list passed by the caller (may include records without GPS)
-// geoRecords = filtered subset that actually has coordinates
 
 @Composable
 private fun MapCard(geoRecords: List<DarwinRecord>, totalRecords: Int) {
     val missingGps = totalRecords - geoRecords.size
-    val isOnline   = isNetworkAvailable()
 
     StatsCard(title = "🗺️  Observation map") {
-
-        // ── "Some records have no GPS" notice ─────────────────────────────────
         if (missingGps > 0) {
             Surface(
-                color  = MaterialTheme.colorScheme.tertiaryContainer,
-                shape  = RoundedCornerShape(8.dp),
+                color    = MaterialTheme.colorScheme.tertiaryContainer,
+                shape    = RoundedCornerShape(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
                     text  = "⚠️  $missingGps observation${if (missingGps > 1) "s" else ""} " +
-                            "without GPS coordinates ${if (missingGps > 1) "are" else "is"} not shown.",
+                            "without GPS ${if (missingGps > 1) "are" else "is"} not shown.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onTertiaryContainer,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
@@ -264,7 +251,7 @@ private fun MapCard(geoRecords: List<DarwinRecord>, totalRecords: Int) {
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    "No GPS data available for any observation.",
+                    "No GPS data available yet.\nGPS coordinates are captured automatically\nwhen you record an observation.",
                     style     = MaterialTheme.typography.bodySmall,
                     color     = MaterialTheme.colorScheme.outline,
                     textAlign = TextAlign.Center
@@ -273,171 +260,109 @@ private fun MapCard(geoRecords: List<DarwinRecord>, totalRecords: Int) {
             return@StatsCard
         }
 
-        // ── Online: Leaflet map with real tiles ───────────────────────────────
-        if (isOnline) {
-            AndroidView(
-                modifier = Modifier.fillMaxWidth().height(280.dp),
-                factory  = { ctx ->
-                    WebView(ctx).apply {
-                        webViewClient              = WebViewClient()
-                        settings.javaScriptEnabled = true
-                        settings.domStorageEnabled = true
-                        loadDataWithBaseURL(null, buildLeafletHtml(geoRecords), "text/html", "UTF-8", null)
-                    }
-                },
-                update   = { webView ->
-                    webView.loadDataWithBaseURL(null, buildLeafletHtml(geoRecords), "text/html", "UTF-8", null)
-                }
-            )
-            Text(
-                text     = "Tap a pin to see the species name · © OpenStreetMap",
-                style    = MaterialTheme.typography.labelSmall,
-                color    = MaterialTheme.colorScheme.outline,
-                modifier = Modifier.padding(top = 4.dp)
-            )
-        } else {
-            // ── Offline: Canvas dot map with coordinate grid ──────────────────
-            OfflineDotMap(geoRecords)
-            Text(
-                text     = "🔴  Offline — map tiles unavailable. Pins are plotted at their GPS coordinates.",
-                style    = MaterialTheme.typography.labelSmall,
-                color    = MaterialTheme.colorScheme.outline,
-                modifier = Modifier.padding(top = 4.dp)
-            )
-        }
+        ObservationMap(geoRecords)
+        Text(
+            text     = "Pins plotted from GPS coordinates · works offline",
+            style    = MaterialTheme.typography.labelSmall,
+            color    = MaterialTheme.colorScheme.outline,
+            modifier = Modifier.padding(top = 6.dp)
+        )
     }
 }
 
-// ─── Offline Canvas dot map ────────────────────────────────────────────────────
+// ─── Canvas observation map ────────────────────────────────────────────────────
 
 @Composable
-private fun OfflineDotMap(records: List<DarwinRecord>) {
-    val primary      = MaterialTheme.colorScheme.primary
-    val gridColor    = MaterialTheme.colorScheme.outlineVariant
-    val bgColor      = MaterialTheme.colorScheme.surfaceVariant
-    val labelColor   = MaterialTheme.colorScheme.onSurfaceVariant
+private fun ObservationMap(records: List<DarwinRecord>) {
+    val primary   = MaterialTheme.colorScheme.primary
+    val onPrimary = MaterialTheme.colorScheme.onPrimary
+    val bgColor   = Color(0xFF1E2020)          // dark map-like background
+    val gridColor = Color(0xFF2E3535)          // subtle grid
+    val axisColor = Color(0xFF8A9A9A)          // coordinate label color
+    val labelBg   = Color(0xCC1E2020)          // semi-transparent label background
 
-    Canvas(modifier = Modifier.fillMaxWidth().height(280.dp)) {
+    Canvas(modifier = Modifier
+        .fillMaxWidth()
+        .height(300.dp)
+        .clip(RoundedCornerShape(10.dp))
+    ) {
         val w = size.width
         val h = size.height
 
-        // Bounding box with padding
-        val lats  = records.map { it.decimalLatitude!! }
-        val lons  = records.map { it.decimalLongitude!! }
-        val latSpan = (lats.max() - lats.min()).coerceAtLeast(0.005)
-        val lonSpan = (lons.max() - lons.min()).coerceAtLeast(0.005)
-        val minLat = lats.min() - latSpan * 0.25
-        val maxLat = lats.max() + latSpan * 0.25
-        val minLon = lons.min() - lonSpan * 0.25
-        val maxLon = lons.max() + lonSpan * 0.25
+        // Bounding box — expand span so a single point isn't a 0×0 box
+        val lats    = records.map { it.decimalLatitude!! }
+        val lons    = records.map { it.decimalLongitude!! }
+        val latSpan = (lats.max() - lats.min()).coerceAtLeast(0.01)
+        val lonSpan = (lons.max() - lons.min()).coerceAtLeast(0.01)
+        val pad     = 0.3
+        val minLat  = lats.min() - latSpan * pad
+        val maxLat  = lats.max() + latSpan * pad
+        val minLon  = lons.min() - lonSpan * pad
+        val maxLon  = lons.max() + lonSpan * pad
 
         fun xOf(lon: Double) = ((lon - minLon) / (maxLon - minLon) * w).toFloat()
-        // Latitude increases northward but y increases downward, so invert
         fun yOf(lat: Double) = ((1.0 - (lat - minLat) / (maxLat - minLat)) * h).toFloat()
 
         // Background
         drawRect(bgColor)
 
-        // Grid (5×5)
-        val gridPaint = android.graphics.Paint().apply {
-            color       = gridColor.toArgb()
-            strokeWidth = 1f
-            isAntiAlias = true
-        }
-        for (i in 1..4) {
-            drawLine(
-                color = gridColor.copy(alpha = 0.4f),
-                start = Offset(w * i / 5f, 0f),
-                end   = Offset(w * i / 5f, h),
-                strokeWidth = 1f
-            )
-            drawLine(
-                color = gridColor.copy(alpha = 0.4f),
-                start = Offset(0f, h * i / 5f),
-                end   = Offset(w, h * i / 5f),
-                strokeWidth = 1f
-            )
+        // Grid lines (4×4)
+        for (i in 1..3) {
+            drawLine(gridColor, Offset(w * i / 4f, 0f), Offset(w * i / 4f, h), strokeWidth = 1f)
+            drawLine(gridColor, Offset(0f, h * i / 4f), Offset(w, h * i / 4f), strokeWidth = 1f)
         }
 
-        // Corner coordinate labels
-        val coordPaint = android.graphics.Paint().apply {
-            color       = labelColor.toArgb()
-            textSize    = 24f
+        val canvas = drawContext.canvas.nativeCanvas
+
+        // Coordinate axis labels
+        val axisPaint = android.graphics.Paint().apply {
+            color       = axisColor.toArgb()
+            textSize    = 22f
             isAntiAlias = true
+            typeface    = android.graphics.Typeface.MONOSPACE
         }
-        val nLabel = "%.3f°N".format(maxLat)
-        val sLabel = "%.3f°N".format(minLat)
-        val wLabel = "%.3f°E".format(minLon)
-        drawContext.canvas.nativeCanvas.apply {
-            drawText(nLabel, 8f, 28f, coordPaint)
-            drawText(sLabel, 8f, h - 8f, coordPaint)
-            drawText(wLabel, 8f, h / 2f, coordPaint)
+        canvas.drawText("%.4f°N".format(maxLat), 10f, 26f, axisPaint)
+        canvas.drawText("%.4f°N".format(minLat), 10f, h - 8f, axisPaint)
+        canvas.drawText("%.4f°E".format(minLon), 10f, h / 2f, axisPaint)
+        canvas.drawText("%.4f°E".format(maxLon), w - 180f, h / 2f, axisPaint)
+
+        // Species label paint
+        val labelPaint = android.graphics.Paint().apply {
+            color       = primary.toArgb()
+            textSize    = 26f
+            isAntiAlias = true
+            isFakeBoldText = true
+        }
+        val labelBgPaint = android.graphics.Paint().apply {
+            color = labelBg.toArgb()
         }
 
-        // Pins
+        // Draw pins + species labels
         records.forEach { r ->
             val x = xOf(r.decimalLongitude!!)
             val y = yOf(r.decimalLatitude!!)
-            drawCircle(Color.White,   radius = 12f, center = Offset(x, y))
-            drawCircle(primary,       radius = 9f,  center = Offset(x, y))
+
+            // Outer glow ring
+            drawCircle(primary.copy(alpha = 0.25f), radius = 20f, center = Offset(x, y))
+            // White border
+            drawCircle(Color.White, radius = 13f, center = Offset(x, y))
+            // Filled pin
+            drawCircle(primary, radius = 10f, center = Offset(x, y))
+
+            // Species label
+            val name = (r.vernacularName.ifBlank { r.scientificName.ifBlank { "?" } })
+                .take(16)
+            val labelX = (x + 18f).coerceAtMost(w - 200f)
+            val labelY = (y + 8f).coerceIn(30f, h - 8f)
+            // Label background for readability
+            val textWidth = labelPaint.measureText(name)
+            canvas.drawRoundRect(
+                labelX - 4f, labelY - 22f, labelX + textWidth + 8f, labelY + 6f,
+                6f, 6f, labelBgPaint
+            )
+            canvas.drawText(name, labelX, labelY, labelPaint)
         }
     }
-}
-
-// ─── Network helper ────────────────────────────────────────────────────────────
-
-@Composable
-private fun isNetworkAvailable(): Boolean {
-    val ctx = LocalContext.current
-    val cm  = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-    val net = cm.activeNetwork ?: return false
-    val cap = cm.getNetworkCapabilities(net) ?: return false
-    return cap.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-}
-
-// ─── Leaflet HTML ──────────────────────────────────────────────────────────────
-
-private fun buildLeafletHtml(records: List<DarwinRecord>): String {
-    val markers = records.mapIndexed { i, r ->
-        val name = (r.vernacularName.ifBlank { r.scientificName.ifBlank { "Unknown" } })
-            .replace("'", "\\'")
-        """
-        var m$i = L.circleMarker([${r.decimalLatitude}, ${r.decimalLongitude}], {
-            radius: 9, color: '#1b5e20', fillColor: '#4caf50',
-            fillOpacity: 0.85, weight: 2
-        }).bindPopup('<b>$name</b><br/>${r.eventDate}<br/>${r.locality.ifBlank { "" }}').addTo(map);
-        markers.push(m$i);
-        """.trimIndent()
-    }.joinToString("\n")
-
-    val fitBounds = if (records.size == 1) {
-        "map.setView([${records[0].decimalLatitude}, ${records[0].decimalLongitude}], 14);"
-    } else {
-        "map.fitBounds(L.featureGroup(markers).getBounds().pad(0.3));"
-    }
-
-    return """
-<!DOCTYPE html><html>
-<head>
-  <meta charset='utf-8'>
-  <meta name='viewport' content='width=device-width,initial-scale=1,maximum-scale=1'>
-  <link rel='stylesheet' href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css'/>
-  <script src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js'></script>
-  <style>html,body,#map{margin:0;padding:0;width:100%;height:100%;}</style>
-</head>
-<body>
-  <div id='map'></div>
-  <script>
-    var map = L.map('map',{zoomControl:true});
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-      attribution:'© <a href="https://openstreetmap.org">OSM</a>'
-    }).addTo(map);
-    var markers=[];
-    $markers
-    $fitBounds
-  </script>
-</body></html>
-    """.trimIndent()
 }
 
 // ─── Shared card wrapper ───────────────────────────────────────────────────────
