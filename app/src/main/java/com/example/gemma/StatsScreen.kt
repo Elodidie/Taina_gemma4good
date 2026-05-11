@@ -36,11 +36,13 @@ fun StatsScreen(vm: StatsViewModel = viewModel()) {
     val geoRecords by vm.geoRecords.collectAsState()
 
     Column(modifier = Modifier.fillMaxSize()) {
-        TopAppBar(
+        CenterAlignedTopAppBar(
             title = { Text("Stats 📊") },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer
-            )
+            colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                containerColor    = MaterialTheme.colorScheme.background,
+                titleContentColor = MaterialTheme.colorScheme.onBackground
+            ),
+            expandedHeight = 40.dp
         )
 
         if (total == 0) {

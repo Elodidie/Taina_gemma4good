@@ -183,12 +183,13 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        TopAppBar(
+        CenterAlignedTopAppBar(
             title = { Text("Taina 🌿") },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer
+            colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                containerColor    = MaterialTheme.colorScheme.background,
+                titleContentColor = MaterialTheme.colorScheme.onBackground
             ),
-            expandedHeight = 48.dp
+            expandedHeight = 40.dp
         )
 
         if (!modelLoaded) {

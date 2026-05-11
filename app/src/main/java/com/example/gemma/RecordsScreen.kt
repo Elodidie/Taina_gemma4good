@@ -61,11 +61,13 @@ fun RecordsScreen(vm: RecordsViewModel = viewModel()) {
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        TopAppBar(
+        CenterAlignedTopAppBar(
             title = { Text("My Records 📋") },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = MaterialTheme.colorScheme.primaryContainer
+            colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                containerColor    = MaterialTheme.colorScheme.background,
+                titleContentColor = MaterialTheme.colorScheme.onBackground
             ),
+            expandedHeight = 40.dp,
             actions = {
                 if (total > 0) {
                     IconButton(onClick = { showConfirm = true }) {
