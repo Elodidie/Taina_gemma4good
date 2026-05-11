@@ -34,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -186,8 +187,8 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
         CenterAlignedTopAppBar(
             title = { Text("Taina 🌿") },
             colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                containerColor    = MaterialTheme.colorScheme.background,
-                titleContentColor = MaterialTheme.colorScheme.onBackground
+                containerColor    = Color(0xFF282828),
+                titleContentColor = Color(0xFFF2EEE4)
             ),
             expandedHeight = 40.dp
         )

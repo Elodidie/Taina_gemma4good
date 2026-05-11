@@ -39,8 +39,8 @@ fun StatsScreen(vm: StatsViewModel = viewModel()) {
         CenterAlignedTopAppBar(
             title = { Text("Stats 📊") },
             colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                containerColor    = MaterialTheme.colorScheme.background,
-                titleContentColor = MaterialTheme.colorScheme.onBackground
+                containerColor    = Color(0xFF282828),
+                titleContentColor = Color(0xFFF2EEE4)
             ),
             expandedHeight = 40.dp
         )

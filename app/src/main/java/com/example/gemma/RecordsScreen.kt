@@ -26,6 +26,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.ui.graphics.Color
 import coil.compose.AsyncImage
 import java.io.File
 import java.text.SimpleDateFormat
@@ -64,8 +65,8 @@ fun RecordsScreen(vm: RecordsViewModel = viewModel()) {
         CenterAlignedTopAppBar(
             title = { Text("My Records 📋") },
             colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                containerColor    = MaterialTheme.colorScheme.background,
-                titleContentColor = MaterialTheme.colorScheme.onBackground
+                containerColor    = Color(0xFF282828),
+                titleContentColor = Color(0xFFF2EEE4)
             ),
             expandedHeight = 40.dp,
             actions = {
