@@ -137,6 +137,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     else -> {
                         val deviceLocation = locationHelper.getCurrentLocation()
                         Log.d("ChatViewModel", "GPS from device (no EXIF): $deviceLocation")
+                        // Embed the device GPS into the photo so the file is self-contained
+                        if (deviceLocation != null) writeExifLocation(file.absolutePath, deviceLocation)
                         deviceLocation
                     }
                 }
@@ -216,10 +218,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Resets history and asks Gemma to open a fresh observation dialogue.
      * Called after a photo is attached or when starting over.
+     * NOTE: intentionally does NOT clear currentPhotoPath — that is only
+     * cleared inside parseAndSave() after the record is persisted.
      */
     private suspend fun startNewObservation() {
         conversationHistory.clear()
-        currentPhotoPath = ""
 
         // Refresh device GPS at the start of each observation so text-only
         // records get a fresh fix rather than the one captured at app launch.
@@ -376,6 +379,35 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             Log.d("ChatViewModel", "No EXIF GPS in $filePath: ${e.message}")
             null
         }
+    }
+
+    /**
+     * Embeds GPS coordinates into a JPEG's EXIF. Used for camera photos where
+     * the camera app didn't write location data (common when the camera app
+     * doesn't have location permission).
+     */
+    private fun writeExifLocation(filePath: String, latLon: LatLon) {
+        try {
+            val exif = ExifInterface(filePath)
+            exif.setAttribute(ExifInterface.TAG_GPS_LATITUDE_REF, if (latLon.lat >= 0) "N" else "S")
+            exif.setAttribute(ExifInterface.TAG_GPS_LATITUDE, decimalToDms(Math.abs(latLon.lat)))
+            exif.setAttribute(ExifInterface.TAG_GPS_LONGITUDE_REF, if (latLon.lon >= 0) "E" else "W")
+            exif.setAttribute(ExifInterface.TAG_GPS_LONGITUDE, decimalToDms(Math.abs(latLon.lon)))
+            exif.saveAttributes()
+            Log.d("ChatViewModel", "GPS written to EXIF: ${latLon.lat}, ${latLon.lon}")
+        } catch (e: Exception) {
+            Log.w("ChatViewModel", "Failed to write GPS EXIF: ${e.message}")
+        }
+    }
+
+    /** Converts a decimal degree value to the DMS rational string format EXIF expects. */
+    private fun decimalToDms(decimal: Double): String {
+        val degrees = decimal.toInt()
+        val minutesF = (decimal - degrees) * 60
+        val minutes = minutesF.toInt()
+        val secondsF = (minutesF - minutes) * 60
+        val secondsNum = (secondsF * 1000).toLong()
+        return "$degrees/1,$minutes/1,$secondsNum/1000"
     }
 
     // ─── UI helpers ───────────────────────────────────────────────────────────
