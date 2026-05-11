@@ -139,20 +139,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 Log.d("ChatViewModel", "Photo copied: ${file.absolutePath} ($bytesCopied bytes)")
                 currentPhotoPath = file.absolutePath
 
-                // ── GPS: prefer EXIF from the photo (taken at the observation site),
-                // fall back to the device's current position.
+                // Read EXIF GPS immediately — it's a fast local file op.
+                // Device GPS is resolved later in parseAndSave() (with timeout +
+                // geocode fallback) so the upload never blocks waiting for a fix.
                 val exifLocation = readExifLocation(file.absolutePath)
-                currentLatLon = when {
-                    exifLocation != null -> {
-                        Log.d("ChatViewModel", "GPS from photo EXIF: $exifLocation")
-                        exifLocation
-                    }
-                    else -> {
-                        val deviceLocation = withTimeoutOrNull(5_000) { locationHelper.getCurrentLocation() }
-                        Log.d("ChatViewModel", "GPS from device (no EXIF): $deviceLocation")
-                        if (deviceLocation != null) writeExifLocation(file.absolutePath, deviceLocation)
-                        deviceLocation
-                    }
+                if (exifLocation != null) {
+                    Log.d("ChatViewModel", "GPS from photo EXIF: $exifLocation")
+                    currentLatLon = exifLocation
                 }
 
                 appendMessage(ChatMessage(
@@ -237,15 +230,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      */
     private suspend fun startNewObservation() {
         conversationHistory.clear()
-
-        // Refresh device GPS at the start of each observation so text-only
-        // records get a fresh fix rather than the one captured at app launch.
-        // (For photo observations this is already overwritten by EXIF or a
-        // fresh fetch inside onPhotoSelected, so this is a no-op in that path.)
-        if (currentLatLon == null) {
-            currentLatLon = locationHelper.getCurrentLocation()
-            Log.d("ChatViewModel", "GPS refreshed at observation start: $currentLatLon")
-        }
+        // GPS is resolved in parseAndSave() — not here — so Gemma starts immediately.
 
         // Seed the conversation with a trigger message so Gemma asks the first question
         val trigger = "I just spotted a species and want to record it."
