@@ -339,12 +339,13 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 if (!geocodedSuccessfully) {
-                    // currentLatLon may already hold a background satellite fix; fetch a fresh one only if empty.
-                    if (currentLatLon == null) {
-                        currentLatLon = withTimeoutOrNull(5_000) { locationHelper.getCurrentLocation() }
-                    }
+                    // Always fetch a fresh fix at save time so a changed device location
+                    // is reflected immediately. Fall back to the background-cached value
+                    // only if the fresh fetch times out (e.g. indoors with no signal).
+                    val freshFix = withTimeoutOrNull(5_000) { locationHelper.getCurrentLocation() }
+                    if (freshFix != null) currentLatLon = freshFix
                     gpsSource = "device GPS"
-                    Log.d("TainaRecord", "GPS from device (background/fresh fix): $currentLatLon")
+                    Log.d("TainaRecord", "GPS from device (fresh=$freshFix, used=$currentLatLon)")
                 }
             }
 
