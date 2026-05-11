@@ -55,6 +55,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private var currentPhotoPath = ""
     private var currentLatLon: LatLon? = null
+    // True when currentLatLon came from photo EXIF — background device GPS must not override it.
+    private var gpsFromExif = false
 
     private val dao            = DarwinDatabase.getInstance(application).darwinDao()
     private val locationHelper = LocationHelper(application)
@@ -72,8 +74,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun startLocationUpdates() {
         stopBackgroundFix = locationHelper.startBackgroundFix { latLon ->
-            currentLatLon = latLon
-            Log.d("ChatViewModel", "GPS updated: $latLon")
+            // Never overwrite a precise EXIF fix with the device's current position.
+            if (!gpsFromExif) {
+                currentLatLon = latLon
+                Log.d("ChatViewModel", "GPS updated from device: $latLon")
+            }
         }
     }
 
@@ -153,6 +158,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 if (exifLocation != null) {
                     Log.d("ChatViewModel", "GPS from photo EXIF: $exifLocation")
                     currentLatLon = exifLocation
+                    gpsFromExif = true
+                } else {
+                    gpsFromExif = false
                 }
 
                 appendMessage(ChatMessage(
@@ -207,7 +215,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     val jsonBlock = extractJson(trimmed)
                     if (jsonBlock != null && isJsonRecord(jsonBlock)) {
                         // Never show the JSON — replace loading bubble with success message
-                        updateLastBotMessage("✅ Observation saved! It will sync to GBIF when WiFi is available. 🌿 Spot another species? Just tell me what you saw!")
+                        updateLastBotMessage("✅ Observation saved! It will sync to your personal database when you are connected to Wi-Fi. 🌿 Spot another species in the field? Just tell me what you saw!")
                                 parseAndSave(jsonBlock, userText)
                     } else {
                         // Normal conversational turn — show response and add to history
@@ -311,19 +319,32 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             val obj = JSONObject(json)
             val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
 
-            // Last-chance GPS: cap at 5 s so the save is never blocked for 30+ s.
-            if (currentLatLon == null) {
-                currentLatLon = withTimeoutOrNull(5_000) { locationHelper.getCurrentLocation() }
-                Log.d("TainaRecord", "GPS from device (last chance): $currentLatLon")
-            }
-
-            // Geocode fallback: if device GPS is still unavailable but the user
-            // gave a locality name, resolve it to coordinates via the OS Geocoder.
-            if (currentLatLon == null) {
+            // GPS resolution — priority order:
+            //   1. EXIF from photo (already in currentLatLon, gpsFromExif = true) — most precise
+            //   2. Locality stated by user → geocode (they explicitly named the place)
+            //   3. Device GPS — background fix or fresh satellite fix (works offline)
+            var gpsSource = "EXIF"
+            if (!gpsFromExif) {
+                var geocodedSuccessfully = false
                 val locality = obj.optString("locality", "")
                 if (locality.isNotBlank()) {
-                    currentLatLon = geocodeLocality(locality)
-                    Log.d("TainaRecord", "GPS from geocoding '$locality': $currentLatLon")
+                    val geocoded = geocodeLocality(locality)
+                    if (geocoded != null) {
+                        currentLatLon = geocoded
+                        geocodedSuccessfully = true
+                        gpsSource = "geocoded locality"
+                        Log.d("TainaRecord", "GPS from geocoding '$locality': $geocoded")
+                    } else {
+                        Log.w("TainaRecord", "Geocoding '$locality' returned null — falling back to device GPS")
+                    }
+                }
+                if (!geocodedSuccessfully) {
+                    // currentLatLon may already hold a background satellite fix; fetch a fresh one only if empty.
+                    if (currentLatLon == null) {
+                        currentLatLon = withTimeoutOrNull(5_000) { locationHelper.getCurrentLocation() }
+                    }
+                    gpsSource = "device GPS"
+                    Log.d("TainaRecord", "GPS from device (background/fresh fix): $currentLatLon")
                 }
             }
 
@@ -352,6 +373,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             Log.d("TainaRecord", "notes          : ${record.notes}")
             Log.d("TainaRecord", "date           : ${record.eventDate}")
             Log.d("TainaRecord", "lat/lon        : ${record.decimalLatitude}, ${record.decimalLongitude}")
+            Log.d("TainaRecord", "gpsSource      : $gpsSource")
             Log.d("TainaRecord", "occurrenceID   : ${record.occurrenceID}")
             Log.d("TainaRecord", "────────────────────────────────────────")
 
@@ -362,6 +384,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             // Reset for next observation
             conversationHistory.clear()
             currentPhotoPath = ""
+            gpsFromExif      = false
 
         } catch (e: Exception) {
             Log.e("ChatViewModel", "Failed to parse or save record", e)
