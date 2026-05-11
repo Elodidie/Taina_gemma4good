@@ -6,7 +6,7 @@
         (status bar, navigation bar) before Compose takes over.
     -->
     <style name="Theme.Gemma" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Match the dark forest-night background from the logo -->
+        <!-- NGO brand black background -->
         <item name="android:windowBackground">@color/taina_bg</item>
         <item name="android:statusBarColor">@color/taina_bg</item>
         <item name="android:navigationBarColor">@color/taina_surface</item>

@@ -7,130 +7,112 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
-// ─── Brand colours ─────────────────────────────────────────────────────────────
-//
-//  Extracted from the Taina logo:
-//    • Background  #121812  — very dark forest-night black
-//    • Primary     #00C878  — vivid leaf-green (the logo mark)
-//
-//  Full palette is derived from those two anchors using Material3 tonal rules.
-// ──────────────────────────────────────────────────────────────────────────────
+// ─── NGO Brand colours ────────────────────────────────────────────────────────
+//   Green  #30CF89   primary action colour
+//   Black  #282828   dark background
+//   Beige  #F2EEE4   light background / warm neutral
+// ─────────────────────────────────────────────────────────────────────────────
 
-// Greens — primary family
-private val Green10  = Color(0xFF002112)
-private val Green20  = Color(0xFF003D22)
-private val Green30  = Color(0xFF005C35)
-private val Green40  = Color(0xFF007A49)   // light-theme primary
-private val Green80  = Color(0xFF5EDDA0)   // dark-theme primary
-private val Green90  = Color(0xFFA0F0C8)   // light primary container
-private val Green95  = Color(0xFFCCF8E4)
-private val GreenLogo= Color(0xFF00C878)   // the exact logo green
+// Primary — NGO green family
+private val NgoGreen       = Color(0xFF30CF89)   // exact brand green
+private val NgoGreenDark   = Color(0xFF1A7A52)   // darker container / dark-theme primary container
+private val NgoGreenLight  = Color(0xFFB8F5DC)   // on-primary-container (light)
+private val NgoGreenDeep   = Color(0xFF003D22)   // on-primary-container (dark)
 
-// Greens — secondary (muted sage)
-private val SageGreen20 = Color(0xFF1E3D2A)
-private val SageGreen40 = Color(0xFF4A7A5E)
-private val SageGreen80 = Color(0xFFA2C9B2)
-private val SageGreen90 = Color(0xFFCDE5D8)
+// Neutrals — derived from black and beige anchors
+private val NgoBlack       = Color(0xFF282828)   // exact brand black
+private val NgoBlackLight  = Color(0xFF323232)   // surface (dark theme)
+private val NgoBlackVariant= Color(0xFF3A3A3A)   // surface variant (dark theme)
 
-// Tertiary — warm amber/moss accent
-private val Moss30  = Color(0xFF3A4A1A)
-private val Moss40  = Color(0xFF556B2F)
-private val Moss80  = Color(0xFFBFCF8A)
-private val Moss90  = Color(0xFFDCECA8)
-
-// Neutrals
-private val DarkBg      = Color(0xFF0F1510)   // app background (dark)
-private val DarkSurface = Color(0xFF161D17)   // card / bottom-bar surface (dark)
-private val DarkSurfaceVariant = Color(0xFF1E2A1F)
-private val NeutralVariant30 = Color(0xFF3A4A3C)
-private val NeutralVariant80 = Color(0xFFB0C4B2)
-private val NeutralVariant90 = Color(0xFFCCE0CE)
+private val NgoBeige       = Color(0xFFF2EEE4)   // exact brand beige
+private val NgoBeigeDeep   = Color(0xFFE8E4DC)   // surface variant (light theme)
+private val NgoBeigeText   = Color(0xFF484440)   // on-surface-variant (light theme)
 
 // On-colours
-private val OnDark    = Color(0xFFE0EDE2)
-private val OnDarkVar = Color(0xFFB0C4B2)
+private val OnDarkBg       = Color(0xFFF2EEE4)   // beige text on dark background
+private val OnDarkSurface  = Color(0xFFD8D4CC)   // muted beige for secondary text
 
 // Error
 private val Red40 = Color(0xFFBA1A1A)
 private val Red80 = Color(0xFFFFB4AB)
 private val Red90 = Color(0xFFFFDAD6)
 
-// ─── Dark scheme (matches the logo aesthetic) ─────────────────────────────────
+// ─── Dark scheme ──────────────────────────────────────────────────────────────
 
 private val TainaDarkColorScheme = darkColorScheme(
-    primary              = GreenLogo,          // #00C878
-    onPrimary            = Green10,
-    primaryContainer     = Green30,
-    onPrimaryContainer   = Green90,
+    primary              = NgoGreen,
+    onPrimary            = NgoBlack,
+    primaryContainer     = NgoGreenDark,
+    onPrimaryContainer   = NgoGreenLight,
 
-    secondary            = SageGreen80,
-    onSecondary          = SageGreen20,
-    secondaryContainer   = SageGreen20,
-    onSecondaryContainer = SageGreen90,
+    secondary            = Color(0xFF90CBA8),     // muted sage green
+    onSecondary          = Color(0xFF1A3D2A),
+    secondaryContainer   = Color(0xFF1E3D2A),
+    onSecondaryContainer = Color(0xFFCCE8D8),
 
-    tertiary             = Moss80,
-    onTertiary           = Moss30,
-    tertiaryContainer    = Moss30,
-    onTertiaryContainer  = Moss90,
+    tertiary             = Color(0xFFD4C89A),      // warm sand accent
+    onTertiary           = Color(0xFF3A3020),
+    tertiaryContainer    = Color(0xFF3A3020),
+    onTertiaryContainer  = Color(0xFFF0E4C0),
 
-    background           = DarkBg,
-    onBackground         = OnDark,
+    background           = NgoBlack,
+    onBackground         = OnDarkBg,
 
-    surface              = DarkSurface,
-    onSurface            = OnDark,
-    surfaceVariant       = DarkSurfaceVariant,
-    onSurfaceVariant     = OnDarkVar,
+    surface              = NgoBlackLight,
+    onSurface            = OnDarkBg,
+    surfaceVariant       = NgoBlackVariant,
+    onSurfaceVariant     = OnDarkSurface,
 
-    outline              = NeutralVariant30,
-    outlineVariant       = DarkSurfaceVariant,
+    outline              = Color(0xFF585450),
+    outlineVariant       = NgoBlackVariant,
 
     error                = Red80,
     onError              = Red40,
     errorContainer       = Red40,
     onErrorContainer     = Red90,
 
-    inverseSurface       = NeutralVariant90,
-    inverseOnSurface     = Green10,
-    inversePrimary       = Green40,
+    inverseSurface       = NgoBeige,
+    inverseOnSurface     = NgoBlack,
+    inversePrimary       = NgoGreenDark,
 )
 
 // ─── Light scheme ─────────────────────────────────────────────────────────────
 
 private val TainaLightColorScheme = lightColorScheme(
-    primary              = Green40,
+    primary              = Color(0xFF1A8C5E),      // darker green for contrast on beige
     onPrimary            = Color.White,
-    primaryContainer     = Green90,
-    onPrimaryContainer   = Green10,
+    primaryContainer     = Color(0xFFB8F5DC),
+    onPrimaryContainer   = NgoGreenDeep,
 
-    secondary            = SageGreen40,
+    secondary            = Color(0xFF3D7A58),
     onSecondary          = Color.White,
-    secondaryContainer   = SageGreen90,
-    onSecondaryContainer = SageGreen20,
+    secondaryContainer   = Color(0xFFCCE8D8),
+    onSecondaryContainer = Color(0xFF1A3D2A),
 
-    tertiary             = Moss40,
+    tertiary             = Color(0xFF7A6A40),
     onTertiary           = Color.White,
-    tertiaryContainer    = Moss90,
-    onTertiaryContainer  = Moss30,
+    tertiaryContainer    = Color(0xFFF0E4C0),
+    onTertiaryContainer  = Color(0xFF3A3020),
 
-    background           = Color(0xFFF4FBF4),
-    onBackground         = Color(0xFF0D1B0F),
+    background           = NgoBeige,
+    onBackground         = NgoBlack,
 
     surface              = Color.White,
-    onSurface            = Color(0xFF0D1B0F),
-    surfaceVariant       = NeutralVariant90,
-    onSurfaceVariant     = NeutralVariant30,
+    onSurface            = NgoBlack,
+    surfaceVariant       = NgoBeigeDeep,
+    onSurfaceVariant     = NgoBeigeText,
 
-    outline              = NeutralVariant80,
-    outlineVariant       = NeutralVariant90,
+    outline              = Color(0xFFA0988C),
+    outlineVariant       = NgoBeigeDeep,
 
     error                = Red40,
     onError              = Color.White,
     errorContainer       = Red90,
     onErrorContainer     = Color(0xFF410002),
 
-    inverseSurface       = Color(0xFF2D3C2F),
-    inverseOnSurface     = Color(0xFFEEF5EE),
-    inversePrimary       = Green80,
+    inverseSurface       = NgoBlack,
+    inverseOnSurface     = NgoBeige,
+    inversePrimary       = NgoGreen,
 )
 
 // ─── TainaTheme composable ────────────────────────────────────────────────────
