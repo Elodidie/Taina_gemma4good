@@ -9,6 +9,8 @@
 
     <application
         android:label="Taina"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@style/Theme.Gemma"
         android:usesCleartextTraffic="true">
         <!-- ↑ Allows plain HTTP to 10.0.2.2 (Ollama on host machine).
