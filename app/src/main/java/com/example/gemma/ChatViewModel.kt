@@ -59,18 +59,27 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val dao            = DarwinDatabase.getInstance(application).darwinDao()
     private val locationHelper = LocationHelper(application)
 
+    // Keeps the background GPS running and caches each fix into currentLatLon.
+    // Started at init, stopped when the ViewModel is cleared.
+    private var stopBackgroundFix: (() -> Unit)? = null
+
     init {
         loadModel()
-        fetchLocation()
+        startLocationUpdates()
     }
 
     // ─── Init ──────────────────────────────────────────────────────────────────
 
-    private fun fetchLocation() {
-        viewModelScope.launch {
-            currentLatLon = locationHelper.getCurrentLocation()
-            Log.d("ChatViewModel", "Location: $currentLatLon")
+    private fun startLocationUpdates() {
+        stopBackgroundFix = locationHelper.startBackgroundFix { latLon ->
+            currentLatLon = latLon
+            Log.d("ChatViewModel", "GPS updated: $latLon")
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        stopBackgroundFix?.invoke()
     }
 
     private fun loadModel() {
@@ -96,12 +105,10 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Called after the user grants location permission so we get a fresh fix. */
+    /** Called after the user grants location permission — (re)starts background GPS. */
     fun refreshLocation() {
-        viewModelScope.launch {
-            currentLatLon = locationHelper.getCurrentLocation()
-            Log.d("ChatViewModel", "Location refreshed after permission grant: $currentLatLon")
-        }
+        stopBackgroundFix?.invoke()
+        startLocationUpdates()
     }
 
     // ─── Public actions ────────────────────────────────────────────────────────
@@ -390,21 +397,29 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Converts a place name to GPS coordinates using the OS Geocoder.
-     * Used as a fallback when the device has no GPS fix but the user mentioned
-     * a locality (e.g. "Zurich" → 47.3769, 8.5417).
-     * Must be called on a background thread (Geocoder does network I/O).
+     * Converts a place name to GPS coordinates using the device's offline Geocoder.
+     * Works without internet on devices that have cached geocoding data (most Android
+     * phones with Google Play Services). Returns null on emulators or if the place
+     * name is too ambiguous — device GPS is the primary source for field use.
      */
     private fun geocodeLocality(locality: String): LatLon? {
+        if (!android.location.Geocoder.isPresent()) {
+            Log.w("ChatViewModel", "Geocoder not available on this device")
+            return null
+        }
         return try {
             val geocoder = android.location.Geocoder(getApplication(), Locale.getDefault())
             @Suppress("DEPRECATION")
             val results = geocoder.getFromLocationName(locality, 1)
             if (!results.isNullOrEmpty()) {
+                Log.d("ChatViewModel", "Geocoder: '$locality' → ${results[0].latitude}, ${results[0].longitude}")
                 LatLon(results[0].latitude, results[0].longitude)
-            } else null
+            } else {
+                Log.w("ChatViewModel", "Geocoder returned no results for '$locality'")
+                null
+            }
         } catch (e: Exception) {
-            Log.w("ChatViewModel", "Geocoding failed for '$locality': ${e.message}")
+            Log.w("ChatViewModel", "Geocoder failed for '$locality': ${e.message}")
             null
         }
     }
