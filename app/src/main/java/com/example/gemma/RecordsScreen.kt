@@ -221,19 +221,17 @@ private fun RecordCard(record: DarwinRecord) {
                     }
                 )
 
-                if (record.locality.isNotBlank()) {
+                val hasLocality = record.locality.isNotBlank()
+                val hasGps = record.decimalLatitude != null && record.decimalLongitude != null
+                if (hasLocality || hasGps) {
                     Spacer(Modifier.height(4.dp))
                     DetailRow(
                         icon  = Icons.Default.LocationOn,
                         label = buildString {
-                            append(record.locality)
-                            if (record.decimalLatitude != null && record.decimalLongitude != null) {
-                                append(
-                                    "  (%.4f, %.4f)".format(
-                                        record.decimalLatitude,
-                                        record.decimalLongitude
-                                    )
-                                )
+                            if (hasLocality) append(record.locality)
+                            if (hasGps) {
+                                if (hasLocality) append("  ")
+                                append("(%.4f, %.4f)".format(record.decimalLatitude, record.decimalLongitude))
                             }
                         }
                     )

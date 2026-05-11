@@ -114,6 +114,25 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
+    // Request location permission on first load so GPS is available for records
+    val locationPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        if (results.values.any { it }) vm.refreshLocation()
+    }
+    LaunchedEffect(Unit) {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            locationPermLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        }
+    }
+
     // Camera URI
     var cameraUri by remember { mutableStateOf<Uri?>(null) }
 

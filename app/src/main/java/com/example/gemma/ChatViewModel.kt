@@ -95,6 +95,14 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Called after the user grants location permission so we get a fresh fix. */
+    fun refreshLocation() {
+        viewModelScope.launch {
+            currentLatLon = locationHelper.getCurrentLocation()
+            Log.d("ChatViewModel", "Location refreshed after permission grant: $currentLatLon")
+        }
+    }
+
     // ─── Public actions ────────────────────────────────────────────────────────
 
     /**
