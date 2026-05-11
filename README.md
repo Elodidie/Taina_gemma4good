@@ -139,7 +139,7 @@ This mode runs Gemma entirely on the Android device — no computer or internet 
 Download the LiteRT model file from Google's model repository. The app expects:
 
 ```
-/data/local/tmp/llm/gemma3-270m-it-q8.litertlm
+/data/local/tmp/llm/gemma-4-E2B-it.litertlm
 ```
 
 #### 5b. Push the model to your device
@@ -148,7 +148,7 @@ Connect your Android device via USB (enable **USB Debugging** in Developer Optio
 
 ```bash
 adb shell mkdir -p /data/local/tmp/llm
-adb push gemma3-270m-it-q8.litertlm /data/local/tmp/llm/
+adb push gemma-4-E2B-it.litertlm /data/local/tmp/llm/
 ```
 
 #### 5c. Switch the flag

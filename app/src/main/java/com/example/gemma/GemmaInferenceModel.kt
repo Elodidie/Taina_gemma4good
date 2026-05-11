@@ -40,7 +40,7 @@ class GemmaInferenceModel private constructor(private val context: Context) {
     private var conversation: com.google.ai.edge.litertlm.Conversation?
 
     private fun getModelPath(): String {
-        val modelFile = File("/data/local/tmp/llm/gemma3-270m-it-q8.litertlm")
+        val modelFile = File("/data/local/tmp/llm/gemma-4-E2B-it.litertlm")
         if (!modelFile.exists()) {
             throw IllegalStateException("Model not found at ${modelFile.absolutePath}")
         }
