@@ -32,6 +32,13 @@ class RecordsViewModel(application: Application) : AndroidViewModel(application)
         .map { list -> list.count { it.status == "PENDING" } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
 
+    /** Delete a single record by its ID. */
+    fun deleteRecord(id: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            dao.deleteById(id)
+        }
+    }
+
     /** Wipe every record from the local database. */
     fun deleteAll() {
         viewModelScope.launch(Dispatchers.IO) {

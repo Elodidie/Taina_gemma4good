@@ -95,7 +95,7 @@ fun RecordsScreen(vm: RecordsViewModel = viewModel()) {
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(records, key = { it.occurrenceID }) { record ->
-                    RecordCard(record = record)
+                    RecordCard(record = record, onDelete = { vm.deleteRecord(record.occurrenceID) })
                 }
             }
         }
@@ -151,9 +151,29 @@ private fun SummaryChip(label: String, description: String, color: androidx.comp
 // ─── Record card ───────────────────────────────────────────────────────────────
 
 @Composable
-private fun RecordCard(record: DarwinRecord) {
+private fun RecordCard(record: DarwinRecord, onDelete: () -> Unit) {
     val isSynced  = record.status == "SYNCED"
     val hasPhoto  = record.photoPath.isNotBlank()
+    var showConfirm by remember { mutableStateOf(false) }
+
+    if (showConfirm) {
+        AlertDialog(
+            onDismissRequest = { showConfirm = false },
+            title  = { Text("Delete observation?") },
+            text   = {
+                val name = record.vernacularName.ifBlank { record.scientificName.ifBlank { "this record" } }
+                Text("\"$name\" will be permanently deleted.")
+            },
+            confirmButton = {
+                TextButton(onClick = { showConfirm = false; onDelete() }) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfirm = false }) { Text("Cancel") }
+            }
+        )
+    }
 
     Card(
         modifier  = Modifier.fillMaxWidth(),
@@ -210,6 +230,18 @@ private fun RecordCard(record: DarwinRecord) {
 
                     Spacer(Modifier.width(8.dp))
                     SyncBadge(synced = isSynced)
+                    Spacer(Modifier.width(4.dp))
+                    IconButton(
+                        onClick  = { showConfirm = true },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector        = Icons.Default.Delete,
+                            contentDescription = "Delete record",
+                            tint               = MaterialTheme.colorScheme.error,
+                            modifier           = Modifier.size(18.dp)
+                        )
+                    }
                 }
 
                 Spacer(Modifier.height(8.dp))

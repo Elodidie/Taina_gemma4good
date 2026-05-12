@@ -18,6 +18,9 @@ interface DarwinDao {
     @Query("UPDATE darwin_records SET status = 'SYNCED' WHERE occurrenceID = :id")
     suspend fun markSynced(id: String)
 
+    @Query("DELETE FROM darwin_records WHERE occurrenceID = :id")
+    suspend fun deleteById(id: String)
+
     @Query("DELETE FROM darwin_records")
     suspend fun deleteAll()
 }
