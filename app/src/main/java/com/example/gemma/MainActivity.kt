@@ -1,9 +1,12 @@
 package com.example.gemma
 
 import android.Manifest
+import android.app.Activity
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
+import android.speech.RecognizerIntent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -24,6 +27,7 @@ import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -137,6 +141,30 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
     // Camera URI
     var cameraUri by remember { mutableStateOf<Uri?>(null) }
 
+    // Speech-to-text launcher — transcribes voice to text, feeds result to Gemma.
+    // Note: Gemma 4 E2B is text-only; Android's ASR does the audio→text conversion.
+    val speechLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val text = result.data
+                ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                ?.firstOrNull()
+                .orEmpty()
+                .trim()
+            if (text.isNotBlank()) vm.sendMessage(text)
+        }
+    }
+
+    fun launchSpeech() {
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+            putExtra(RecognizerIntent.EXTRA_PROMPT, "Tell Taina what you spotted…")
+        }
+        speechLauncher.launch(intent)
+    }
+
     // File picker — GetContent allows selecting images from any folder (Downloads, etc.)
     val photoPickerLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
@@ -185,12 +213,12 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
 
     Column(modifier = Modifier.fillMaxSize()) {
         CenterAlignedTopAppBar(
-            title = { Text("Taina 🌿") },
+            title = { Text("Taina 🌿", style = MaterialTheme.typography.titleLarge) },
             colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                 containerColor    = Color(0xFF282828),
                 titleContentColor = Color(0xFFF2EEE4)
             ),
-            expandedHeight = 40.dp,
+            expandedHeight = 56.dp,
             windowInsets = WindowInsets(0)
         )
 
@@ -224,12 +252,18 @@ fun ChatScreen(vm: ChatViewModel = viewModel()) {
 
             // Gallery button
             IconButton(
-                onClick = {
-                    photoPickerLauncher.launch("image/*")
-                },
+                onClick = { photoPickerLauncher.launch("image/*") },
                 enabled = modelLoaded && !isLoading
             ) {
                 Icon(Icons.Default.PhotoLibrary, contentDescription = "Upload photo")
+            }
+
+            // Mic button — Android ASR transcribes voice, result is sent to Gemma as text
+            IconButton(
+                onClick = { launchSpeech() },
+                enabled = modelLoaded && !isLoading
+            ) {
+                Icon(Icons.Default.Mic, contentDescription = "Speak")
             }
 
             OutlinedTextField(

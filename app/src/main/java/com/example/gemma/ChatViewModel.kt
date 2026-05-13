@@ -1,9 +1,10 @@
 package com.example.gemma
 
 import android.app.Application
+import android.media.ExifInterface
+import android.media.MediaPlayer
 import android.net.Uri
 import android.util.Log
-import android.media.ExifInterface
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -13,12 +14,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 // ─── Data ─────────────────────────────────────────────────────────────────────
 
@@ -44,6 +47,9 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _recordSaved = MutableStateFlow<String?>(null)
     val recordSaved: StateFlow<String?> = _recordSaved.asStateFlow()
+
+    private val _currentLocation = MutableStateFlow<LatLon?>(null)
+    val currentLocation: StateFlow<LatLon?> = _currentLocation.asStateFlow()
 
     private var model: GemmaInferenceModel? = null
 
@@ -77,6 +83,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             // Never overwrite a precise EXIF fix with the device's current position.
             if (!gpsFromExif) {
                 currentLatLon = latLon
+                _currentLocation.value = latLon
                 Log.d("ChatViewModel", "GPS updated from device: $latLon")
             }
         }
@@ -96,7 +103,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
                 if (_messages.value.isEmpty()) {
                     appendMessage(ChatMessage(
-                        text    = "Hi! I'm Taina 🌿 Share a photo or tell me what species you spotted!",
+                        text    = "Hi! I'm Taina 🌿 I can help you with:\n\n🐦 Recording a species observation\n🎵 Setting up an AudioMoth bioacoustic recorder\n\nWhat would you like to do?",
                         isUser  = false
                     ))
                 }
@@ -210,17 +217,25 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                     _isLoading.value = false
                     val trimmed = accumulated.trim()
 
-                    // Extract JSON even if Gemma wraps it in prose —
-                    // scan for the first { ... } block in the response
+                    // Extract the first well-formed JSON block from the response
                     val jsonBlock = extractJson(trimmed)
-                    if (jsonBlock != null && isJsonRecord(jsonBlock)) {
-                        // Never show the JSON — replace loading bubble with success message
-                        updateLastBotMessage("✅ Observation saved! It will sync to your personal database when you are connected to Wi-Fi. 🌿 Spot another species in the field? Just tell me what you saw!")
-                                parseAndSave(jsonBlock, userText)
-                    } else {
-                        // Normal conversational turn — show response and add to history
-                        updateLastBotMessage(trimmed)
-                        conversationHistory.add(Pair(userText, trimmed))
+                    when {
+                        jsonBlock != null && isAudioMothJson(jsonBlock) -> {
+                            // Show Gemma's closing sentence (before the JSON), then generate
+                            val preJson = trimmed.substringBefore("{").trim()
+                            updateLastBotMessage(preJson.ifBlank { "🎵 Generating your AudioMoth chime…" })
+                            playChimeFromJson(jsonBlock)
+                        }
+                        jsonBlock != null && isJsonRecord(jsonBlock) -> {
+                            // Show Gemma's closing sentence which already contains the follow-up question
+                            val preJson = trimmed.substringBefore("{").trim()
+                            updateLastBotMessage(preJson.ifBlank { "✅ Observation saved! It will be published to the open biodiversity ledger on ATProto when connected." })
+                            parseAndSave(jsonBlock, userText)
+                        }
+                        else -> {
+                            updateLastBotMessage(trimmed)
+                            conversationHistory.add(Pair(userText, trimmed))
+                        }
                     }
                 }
                 ?.collect { token ->
@@ -247,8 +262,8 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         conversationHistory.clear()
         // GPS is resolved in parseAndSave() — not here — so Gemma starts immediately.
 
-        // Seed the conversation with a trigger message so Gemma asks the first question
-        val trigger = "I just spotted a species and want to record it."
+        // [photo attached] tells Gemma to skip the photo offer — one is already provided
+        val trigger = "[photo attached] I just spotted a species and want to record it."
         appendMessage(ChatMessage(text = trigger, isUser = true))
         appendLoadingBubble()
         _isLoading.value = true
@@ -305,6 +320,71 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         return null
     }
 
+    private fun isAudioMothJson(text: String): Boolean {
+        val stripped = text.trim()
+        if (!stripped.startsWith("{")) return false
+        return try {
+            JSONObject(stripped).optBoolean("audiomoth", false)
+        } catch (_: Exception) { false }
+    }
+
+    /**
+     * Called when Gemma emits the AudioMoth sentinel JSON.
+     * Resolves "device" lat/lng to the current GPS fix and "random" to a fresh hex ID,
+     * then generates and plays the chime WAV.
+     */
+    private suspend fun playChimeFromJson(json: String) {
+        try {
+            val obj = JSONObject(json)
+
+            val latRaw = obj.opt("lat")
+            val lat = if (latRaw is Number) latRaw.toDouble()
+                      else currentLatLon?.lat ?: 0.0
+
+            val lngRaw = obj.opt("lng")
+            val lng = if (lngRaw is Number) lngRaw.toDouble()
+                      else currentLatLon?.lon ?: 0.0
+
+            val depRaw = obj.optString("deploymentId", "random")
+            val deploymentHex = if (depRaw == "random" || depRaw.length != 16) randomHex()
+                                else depRaw.lowercase()
+
+            val timestamp = System.currentTimeMillis() / 1000L
+            val samples = AudioMothChimeGenerator.generate(timestamp, lat, lng, deploymentHex)
+            val wavFile = File(getApplication<Application>().cacheDir, "audiomoth_chime.wav")
+            AudioMothChimeGenerator.writeWav(wavFile, samples)
+
+            withContext(Dispatchers.Main) {
+                val mp = MediaPlayer()
+                mp.setDataSource(wavFile.absolutePath)
+                mp.prepare()
+                mp.start()
+                mp.setOnCompletionListener { it.release() }
+            }
+
+            val utcFmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+                .apply { timeZone = TimeZone.getTimeZone("UTC") }
+            appendMessage(ChatMessage(
+                text = "✅ Chime playing! Hold your AudioMoth close to the speaker.\n\n" +
+                       "• Time set to: ${utcFmt.format(Date(timestamp * 1000))} UTC\n" +
+                       "• GPS: ${"%.5f".format(lat)}°, ${"%.5f".format(lng)}°\n" +
+                       "• Deployment ID: $deploymentHex\n\n" +
+                       "Would you like to record a species observation, or configure another device? 🌿",
+                isUser = false
+            ))
+            conversationHistory.clear()
+
+        } catch (e: Exception) {
+            Log.e("AudioMoth", "Chime playback failed", e)
+            appendMessage(ChatMessage(text = "❌ Chime failed: ${e.message}", isUser = false))
+        }
+    }
+
+    private fun randomHex(length: Int = 16): String {
+        val chars = "0123456789abcdef"
+        return (1..length).map { chars.random() }.joinToString("")
+    }
+
     private fun isJsonRecord(text: String): Boolean {
         val stripped = text.trim()
         if (!stripped.startsWith("{")) return false
@@ -349,9 +429,19 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
+            val commonName = obj.optString("commonName", "")
+            val rawScientific = obj.optString("scientificName", "").trim()
+            val scientificName = when {
+                rawScientific.isNotBlank()
+                    && !rawScientific.equals("unknown", ignoreCase = true)
+                    && !rawScientific.equals("don't know", ignoreCase = true)
+                    && !rawScientific.equals("n/a", ignoreCase = true) -> rawScientific
+                else -> SpeciesLookup.lookup(commonName) ?: "no data"
+            }
+
             val record = DarwinRecord(
-                scientificName   = obj.optString("scientificName", ""),
-                vernacularName   = obj.optString("commonName", ""),
+                scientificName   = scientificName,
+                vernacularName   = commonName,
                 individualCount  = obj.optInt("count", 1),
                 locality         = obj.optString("locality", ""),
                 habitat          = obj.optString("habitat", ""),
