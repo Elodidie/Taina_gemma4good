@@ -71,4 +71,5 @@ dependencies {
 
     // Extended icons (AddAPhoto, PhotoLibrary)
     implementation("androidx.compose.material:material-icons-extended:1.6.8")
+
 }

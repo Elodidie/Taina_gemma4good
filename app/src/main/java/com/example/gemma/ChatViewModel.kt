@@ -177,7 +177,6 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
                 ))
 
                 // Reset conversation for a fresh observation
-                // (_isLoading stays true — startNewObservation keeps it set until Gemma responds)
                 startNewObservation()
 
             } catch (e: Exception) {
@@ -196,6 +195,16 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun sendMessage(userText: String) {
         if (userText.isBlank() || _isLoading.value) return
+
+        // When starting fresh and the user expresses species-recording intent, show a
+        // deterministic photo offer rather than letting the LLM decide whether to ask.
+        if (conversationHistory.isEmpty() && currentPhotoPath.isEmpty() && isSpeciesRecordingIntent(userText)) {
+            appendMessage(ChatMessage(text = userText, isUser = true))
+            val photoOffer = "Would you like to add a photo? 📷 Tap the camera or 🖼️ gallery button, or just describe what you spotted."
+            appendMessage(ChatMessage(text = photoOffer, isUser = false))
+            conversationHistory.add(Pair(userText, photoOffer))
+            return
+        }
 
         appendMessage(ChatMessage(text = userText, isUser = true))
         appendLoadingBubble()
@@ -253,42 +262,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     // ─── Conversation management ───────────────────────────────────────────────
 
     /**
-     * Resets history and asks Gemma to open a fresh observation dialogue.
-     * Called after a photo is attached or when starting over.
+     * Resets history and starts a fresh observation dialogue after a photo is attached.
+     * Shows a deterministic first question rather than calling the LLM, which was
+     * unreliable and sometimes still asked about photo despite [photo attached] tag.
      * NOTE: intentionally does NOT clear currentPhotoPath — that is only
      * cleared inside parseAndSave() after the record is persisted.
      */
-    private suspend fun startNewObservation() {
+    private fun startNewObservation() {
         conversationHistory.clear()
-        // GPS is resolved in parseAndSave() — not here — so Gemma starts immediately.
 
-        // [photo attached] tells Gemma to skip the photo offer — one is already provided
-        val trigger = "[photo attached] I just spotted a species and want to record it."
-        appendMessage(ChatMessage(text = trigger, isUser = true))
-        appendLoadingBubble()
-        _isLoading.value = true
+        val trigger  = "[photo attached] I just spotted a species and want to record it."
+        val response = "Great photo! 📸 What's the common name of the species you spotted?"
 
-        var accumulated = ""
-
-        model?.sendMessage(
-            history     = emptyList(),
-            userMessage = trigger
-        )
-            ?.catch { e ->
-                Log.e("ChatViewModel", "Gemma error on start", e)
-                updateLastBotMessage("What species did you spot? 🌿")
-                _isLoading.value = false
-            }
-            ?.onCompletion {
-                _isLoading.value = false
-                val trimmed = accumulated.trim()
-                updateLastBotMessage(trimmed)
-                conversationHistory.add(Pair(trigger, trimmed))
-            }
-            ?.collect { token ->
-                accumulated += token
-                updateLastBotMessage(accumulated)
-            }
+        appendMessage(ChatMessage(text = response, isUser = false))
+        conversationHistory.add(Pair(trigger, response))
+        _isLoading.value = false
     }
 
     // ─── JSON detection & record saving ───────────────────────────────────────
@@ -465,6 +453,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
             Log.d("TainaRecord", "date           : ${record.eventDate}")
             Log.d("TainaRecord", "lat/lon        : ${record.decimalLatitude}, ${record.decimalLongitude}")
             Log.d("TainaRecord", "gpsSource      : $gpsSource")
+            Log.d("TainaRecord", "photoPath      : ${record.photoPath.ifBlank { "(none)" }}")
             Log.d("TainaRecord", "occurrenceID   : ${record.occurrenceID}")
             Log.d("TainaRecord", "────────────────────────────────────────")
 
@@ -565,6 +554,21 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
         val secondsF = (minutesF - minutes) * 60
         val secondsNum = (secondsF * 1000).toLong()
         return "$degrees/1,$minutes/1,$secondsNum/1000"
+    }
+
+    // ─── Intent detection ─────────────────────────────────────────────────────
+
+    private fun isSpeciesRecordingIntent(text: String): Boolean {
+        val lower = text.lowercase()
+        if (lower.contains("audiomoth") || lower.contains("acoustic recorder")) return false
+        return lower.contains("record") || lower.contains("species") ||
+               lower.contains("observation") || lower.contains("spot") ||
+               lower.contains("wildlife") || lower.contains("biodiversity") ||
+               lower.contains("observed") || lower.contains("saw") ||
+               (lower.contains("log") && !lower.contains("login")) ||
+               lower.contains("found") || lower.contains("bird") ||
+               lower.contains("plant") || lower.contains("animal") ||
+               lower.contains("insect") || lower.contains("flower")
     }
 
     // ─── UI helpers ───────────────────────────────────────────────────────────
