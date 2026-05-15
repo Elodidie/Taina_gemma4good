@@ -1,6 +1,6 @@
 # Taina 🌿
 
-Taina is an Android app for field biodiversity observation, built for NGO rangers and naturalists who work in areas with limited or no internet connectivity. An on-device AI assistant (Google Gemma) guides users through recording species sightings via natural conversation, stores them in the [Darwin Core](https://dwc.tdwg.org/) standard, and syncs to GBIF when WiFi is available.
+Taina is an Android app for field biodiversity observation, built for NGO rangers and naturalists who work in areas with limited or no internet connectivity. An on-device AI assistant (Google Gemma) guides users through recording species sightings via natural conversation, stores them in the [Darwin Core](https://dwc.tdwg.org/) standard, and publishes them to a decentralised [ATProto](https://atproto.com/) Personal Data Server when connectivity returns — keeping data ownership with the originating community.
 
 ---
 
@@ -12,7 +12,7 @@ Taina is an Android app for field biodiversity observation, built for NGO ranger
 - **Fully offline capable** — AI runs on-device, GPS uses satellite only, the map needs no internet
 - **Records gallery** — browse all past observations with photos and Darwin Core fields
 - **Stats screen** — timeline chart, top species, and an offline canvas map with observation pins
-- **GBIF sync** — records upload automatically over WiFi when available
+- **ATProto sync** — records publish automatically to a decentralised PDS when any network is available; communities retain ownership via their own DID
 
 ---
 
@@ -21,7 +21,7 @@ Taina is an Android app for field biodiversity observation, built for NGO ranger
 1. You open the app and either take a photo or start typing
 2. Taina (the AI) asks you a series of short questions: species name, count, habitat, location, notes
 3. When you confirm, it saves a Darwin Core record to the local database with GPS coordinates
-4. When you connect to WiFi, the record syncs to GBIF
+4. When any network connection is available, the record publishes to an ATProto PDS under the community's own decentralised identifier
 
 ---
 
@@ -185,7 +185,7 @@ app/src/main/java/com/example/gemma/
 ├── RecordsViewModel.kt      # Records list state
 ├── StatsScreen.kt           # Timeline chart, species chart, offline map
 ├── StatsViewModel.kt        # Aggregated stats queries
-├── SyncWorker.kt            # WorkManager GBIF upload (WiFi-only)
+├── SyncWorker.kt            # WorkManager ATProto publish (any network)
 └── TainaTheme.kt            # NGO brand color scheme
 ```
 
@@ -211,15 +211,21 @@ app/src/main/java/com/example/gemma/
 
 ---
 
-## GBIF sync
+## ATProto sync
 
-The sync worker is stubbed in `SyncWorker.kt`. To enable real uploads, uncomment the HTTP POST block and replace the URL with your GBIF-compatible endpoint:
+`SyncWorker.kt` publishes pending Darwin Core records to an ATProto Personal Data Server (PDS) using a custom `org.taina.biodiversity.occurrence` lexicon. Each published record receives a permanent `at://` URI and a content hash (CID) — no central authority can alter or delete it.
+
+To configure for your community's PDS, update the three constants at the top of `SyncWorker.kt`:
 
 ```kotlin
-// val url = URL("https://your-api.example.com/occurrences")
+private val PDS_HOST         = "https://bsky.social"          // or your self-hosted PDS
+private val ATP_HANDLE       = "taina-biodiversity.bsky.social"
+private val ATP_APP_PASSWORD = "xxxx-xxxx-xxxx-xxxx"          // generate in Settings → App Passwords
 ```
 
-The worker runs automatically on WiFi and retries failed uploads.
+> **Production note:** store `ATP_APP_PASSWORD` in `EncryptedSharedPreferences` (Jetpack Security) rather than hardcoding it before release.
+
+The worker triggers automatically whenever any network connection is available and retries failed publishes. Communities that want full data sovereignty can self-host a PDS — records published there are still discoverable by researchers through any ATProto-compatible client, while remaining under the community's own DID.
 
 ---
 
@@ -230,6 +236,7 @@ The worker runs automatically on WiFi and retries failed uploads.
 - [Ollama](https://ollama.com) — local AI server for development
 - [Room](https://developer.android.com/training/data-storage/room) — local database
 - [WorkManager](https://developer.android.com/topic/libraries/architecture/workmanager) — background sync
+- [ATProto](https://atproto.com/) — decentralised open data publication
 - [Coil](https://coil-kt.github.io/coil/) — image loading
 
 ---
